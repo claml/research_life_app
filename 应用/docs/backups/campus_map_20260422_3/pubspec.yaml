@@ -1,0 +1,26 @@
+name: research_life
+description: "研究生活 Windows 桌面端。"
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  archive: ^4.0.7
+  charset_converter: ^2.3.0
+  desktop_drop: ^0.6.1
+  file_selector: ^1.0.3
+  xml: ^6.6.1
+  http: ^1.6.0
+  path_provider: ^2.1.5
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true

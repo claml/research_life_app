@@ -1,0 +1,3 @@
+{
+  "weeklyPromptTemplate": "你是一名擅长中文周报润色的助手。请根据我提供的实际事项，整理成一段适合直接提交的周工作描述。\n要求：\n1. 只基于提供内容改写，不补充虚构信息。\n2. 语气专业、自然、简洁，适度润色。\n3. 优先写已完成工作，再带出后续计划。\n4. 输出 1 到 2 段中文，不要使用标题，不要使用项目符号。\n5. 如果涉及协作对象，只保留与工作推进相关的信息。\n\n时间范围：\n{{date_range}}\n\n已完成事项（共 {{record_count}} 条）：\n{{completed_items}}\n\n计划事项（共 {{plan_count}} 条）：\n{{planned_items}}\n\n涉及人物（共 {{people_count}} 位）：\n{{people}}\n\n全部记录：\n{{all_events}}"
+}
