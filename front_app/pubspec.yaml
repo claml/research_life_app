@@ -1,0 +1,52 @@
+name: research_life
+description: "研究生活 Windows 桌面端。"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.11.4
+
+dependencies:
+  flutter:
+    sdk: flutter
+  archive: ^4.0.7
+  charset_converter: ^2.3.0
+  crypto: ^3.0.7
+  desktop_drop: ^0.6.1
+  file_selector: ^1.0.3
+  xml: ^6.6.1
+  path_provider: ^2.1.5
+  drift: ^2.32.1
+  sqlite3_flutter_libs: ^0.6.0+eol
+  path: ^1.9.1
+  pdfrx: 2.2.24
+  sqlite3: ^3.3.1
+  dio: ^5.8.0+1
+  shared_preferences: ^2.5.3
+  flutter_markdown: ^0.7.7+1
+  tray_manager: ^0.5.3
+  window_manager: ^0.5.2
+  win32: ^6.4.0
+  ffi: ^2.2.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  drift_dev: ^2.32.1
+  build_runner: ^2.14.1
+
+hooks:
+  user_defines:
+    sqlite3:
+      source: system
+      name_windows: winsqlite3
+      name: sqlite3
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/logo/searchlife_logo.png
+    - assets/icon/app_icon.ico
+    - assets/campus_map/
+    - assets/pets/

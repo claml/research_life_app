@@ -1,0 +1,490 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>研LIFE · 前端风格预览</title>
+<style>
+  :root {
+    /* ===== green 学术绿（默认主题）令牌，与 app_tokens.dart 一致 ===== */
+    --canvas: #F5F7F2;
+    --backdrop-top: #F8FBF7;
+    --backdrop-mid: #EEF5F0;
+    --backdrop-bot: #F9FAF8;
+    --shell-surface: #FDFEFC;
+    --shell-border: rgba(255,255,255,.85);
+    --sidebar: #18392C;
+    --sidebar-strong: #11291F;
+    --sidebar-selected: #E8F1E8;
+    --panel: #FFFFFF;
+    --panel-subtle: #F4F8F3;
+    --panel-accent: #EAF4EB;
+    --inset: #FBFCFA;
+    --border-soft: #DDE6DE;
+    --border-faint: #E8EEE8;
+    --text-1: #183129;
+    --text-2: #617066;
+    --text-3: #8B978F;
+    --accent: #2F6B4B;
+    --accent-hover: #255A3F;
+    --accent-soft: #DCEBDE;
+    --warm: #C9A56A;
+    --r-s: 12px; --r-m: 16px; --r-l: 20px; --r-xl: 24px; --r-shell: 28px;
+    --shadow-sm: 0 6px 18px rgba(16,36,28,.06);
+    --shadow-md: 0 14px 32px rgba(16,36,28,.09);
+    --shadow-lg: 0 20px 48px rgba(16,36,28,.16);
+    /* 语义色（规划） */
+    --success: #2E7D4F; --success-soft: #E1F0E7;
+    --warning: #C98A2D; --warning-soft: #F7EEDB;
+    --danger:  #C04545; --danger-soft:  #F6E3E3;
+    /* 预览页自身 */
+    --page-bg: #EFEFEA;
+    --code-bg: #F3F4EF;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", sans-serif;
+    background: var(--page-bg);
+    color: var(--text-1);
+    font-size: 14px;
+    line-height: 1.55;
+  }
+  .wrap { max-width: 1160px; margin: 0 auto; padding: 48px 40px 96px; }
+
+  /* ---------- 预览页自身排版 ---------- */
+  .doc-header { margin-bottom: 40px; }
+  .doc-kicker { font-size: 12px; font-weight: 600; letter-spacing: 2px; color: var(--accent); margin-bottom: 8px; }
+  .doc-header h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.5px; }
+  .doc-header p { color: var(--text-2); margin-top: 8px; max-width: 640px; }
+  section.doc { margin-top: 56px; }
+  section.doc > h2 {
+    font-size: 20px; font-weight: 700; letter-spacing: -0.3px;
+    padding-bottom: 12px; border-bottom: 1px solid #D8DAD2; margin-bottom: 8px;
+  }
+  section.doc > .desc { color: var(--text-2); font-size: 13px; margin: 10px 0 24px; max-width: 720px; }
+  .grid { display: grid; gap: 16px; }
+
+  /* ---------- 1. App Shell 模拟 ---------- */
+  .shell-mock {
+    background: linear-gradient(135deg, var(--backdrop-top), var(--backdrop-mid) 50%, var(--backdrop-bot));
+    border-radius: 20px; padding: 20px;
+    display: flex; gap: 20px; box-shadow: var(--shadow-md);
+    min-height: 460px;
+  }
+  .mock-sidebar {
+    width: 216px; flex-shrink: 0;
+    background: linear-gradient(180deg, var(--sidebar), var(--sidebar-strong));
+    border-radius: var(--r-shell); padding: 18px 14px;
+    display: flex; flex-direction: column;
+  }
+  .mock-logo-row { display: flex; align-items: center; gap: 10px; margin-bottom: 4px; }
+  .mock-logo {
+    width: 44px; height: 44px; border-radius: var(--r-m);
+    background: rgba(255,255,255,.94);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 20px; font-weight: 700; color: var(--accent);
+  }
+  .mock-appname { color: #fff; font-size: 15px; font-weight: 600; margin-top: 10px; }
+  .mock-nav { margin-top: 18px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .mock-nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 12px; border-radius: var(--r-m);
+    color: rgba(255,255,255,.92); font-size: 12.5px; font-weight: 500;
+  }
+  .mock-nav-item .ico { width: 18px; text-align: center; font-size: 14px; }
+  .mock-nav-item.selected {
+    background: var(--sidebar-selected); color: var(--sidebar-strong);
+    font-weight: 600; box-shadow: inset 0 0 0 1px rgba(255,255,255,.2);
+  }
+  .mock-nav-group { color: rgba(255,255,255,.72); font-size: 12px; font-weight: 600; padding: 8px 12px 4px; display: flex; justify-content: space-between; }
+  .mock-nav-item.nested { padding-left: 26px; font-size: 12px; }
+  .mock-content {
+    flex: 1; background: rgba(253,254,252,.92); border-radius: var(--r-shell);
+    box-shadow: var(--shadow-md); padding: 26px 28px;
+    display: flex; flex-direction: column; gap: 16px;
+  }
+  .mock-page-head h3 { font-size: 22px; font-weight: 600; letter-spacing: -0.3px; }
+  .mock-page-head p { color: var(--text-2); font-size: 12.5px; margin-top: 4px; }
+  .mock-cards { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .mock-card {
+    background: var(--panel); border: 1px solid var(--border-faint);
+    border-radius: var(--r-l); padding: 18px; box-shadow: var(--shadow-sm);
+  }
+  .mock-card h4 { font-size: 15px; font-weight: 600; }
+  .mock-card .sub { color: var(--text-2); font-size: 12px; margin-top: 2px; }
+  .mock-stat-row { display: flex; gap: 12px; margin-top: 14px; }
+  .mock-stat { flex: 1; background: var(--panel-subtle); border-radius: var(--r-m); padding: 12px 14px; }
+  .mock-stat b { font-size: 20px; font-weight: 600; display: block; }
+  .mock-stat span { font-size: 11.5px; color: var(--text-2); }
+  .weather-pill {
+    display: inline-flex; align-items: center; gap: 8px;
+    background: var(--inset); border: 1px solid var(--border-faint);
+    border-radius: 999px; padding: 8px 14px; font-size: 12.5px; color: var(--text-1);
+  }
+  .weather-pill .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--warm); }
+
+  /* ---------- 2. 主题族 ---------- */
+  .theme-row { display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px; }
+  .theme-chip {
+    border-radius: var(--r-l); overflow: hidden; background: var(--panel);
+    border: 1px solid #DEE0D8; box-shadow: var(--shadow-sm);
+  }
+  .theme-chip .bar { height: 64px; display: flex; }
+  .theme-chip .bar i { flex: 1; }
+  .theme-chip .meta { padding: 10px 12px; }
+  .theme-chip .meta b { font-size: 13px; display: block; }
+  .theme-chip .meta span { font-size: 11px; color: var(--text-2); }
+  .theme-chip.default { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  /* ---------- 3. 令牌层 ---------- */
+  .layer-stack { display: flex; flex-direction: column; gap: 10px; }
+  .layer {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 14px 18px; border-radius: var(--r-m);
+    border: 1px solid var(--border-faint); background: var(--panel);
+  }
+  .layer .name { font-weight: 600; font-size: 13px; }
+  .layer .role { font-size: 12px; color: var(--text-2); }
+  .layer .swatches { display: flex; gap: 6px; }
+  .sw { width: 34px; height: 34px; border-radius: 8px; border: 1px solid rgba(0,0,0,.08); position: relative; }
+  .sw small { position: absolute; bottom: -17px; left: 50%; transform: translateX(-50%); font-size: 9.5px; color: var(--text-3); white-space: nowrap; }
+  .swatches.spaced { margin-bottom: 18px; }
+
+  /* ---------- 4. 语义色 ---------- */
+  .sem-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .sem-card { border-radius: var(--r-l); padding: 16px 18px; border: 1px solid var(--border-faint); background: var(--panel); }
+  .sem-card .pill { display: inline-block; border-radius: 999px; padding: 4px 12px; font-size: 12px; font-weight: 600; margin-bottom: 10px; }
+  .sem-card p { font-size: 12px; color: var(--text-2); }
+
+  /* ---------- 5. 字阶 ---------- */
+  .type-table { background: var(--panel); border: 1px solid var(--border-faint); border-radius: var(--r-l); overflow: hidden; }
+  .type-row { display: flex; align-items: baseline; gap: 20px; padding: 16px 22px; border-bottom: 1px solid var(--border-faint); }
+  .type-row:last-child { border-bottom: none; }
+  .type-row .tk { width: 150px; flex-shrink: 0; font-family: Consolas, monospace; font-size: 11.5px; color: var(--text-2); }
+  .type-row .spec { width: 170px; flex-shrink: 0; font-size: 11.5px; color: var(--text-3); }
+  .type-row .demo { flex: 1; }
+
+  /* ---------- 6. 圆角/阴影/间距 ---------- */
+  .shape-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .shape-box { background: var(--panel); border: 1px solid var(--border-faint); height: 92px; display: flex; align-items: flex-end; padding: 12px 14px; font-size: 12px; color: var(--text-2); }
+  .shadow-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; margin-top: 16px; }
+  .shadow-box { background: var(--panel); border-radius: var(--r-l); height: 84px; display: flex; align-items: center; justify-content: center; font-size: 12.5px; color: var(--text-2); }
+  .space-row { display: flex; align-items: flex-end; gap: 18px; margin-top: 14px; flex-wrap: wrap; }
+  .space-item { text-align: center; }
+  .space-item i { display: block; background: var(--accent-soft); border-radius: 4px; margin: 0 auto 6px; }
+  .space-item span { font-size: 11px; color: var(--text-2); font-family: Consolas, monospace; }
+
+  /* ---------- 7. 组件小样 ---------- */
+  .comp-stage { background: var(--panel); border: 1px solid var(--border-faint); border-radius: var(--r-l); padding: 26px 28px; display: flex; flex-direction: column; gap: 26px; }
+  .comp-group h5 { font-size: 12px; font-weight: 600; color: var(--text-2); letter-spacing: 1px; margin-bottom: 12px; text-transform: uppercase; }
+  .btn-row { display: flex; gap: 12px; flex-wrap: wrap; align-items: center; }
+  .btn { border-radius: var(--r-s); padding: 11px 18px; font-size: 13.5px; font-weight: 600; border: none; cursor: default; }
+  .btn-filled { background: var(--accent); color: #fff; }
+  .btn-filled.hover { background: var(--accent-hover); }
+  .btn-outlined { background: transparent; color: var(--text-1); box-shadow: inset 0 0 0 1px var(--border-soft); }
+  .btn-text { background: transparent; color: var(--accent); padding: 9px 14px; }
+  .btn-danger { background: var(--danger); color: #fff; }
+  .btn.disabled { background: rgba(47,107,75,.35); color: #fff; }
+  .input-demo {
+    background: var(--inset); border: 1px solid var(--border-faint);
+    border-radius: var(--r-m); padding: 12px 16px; font-size: 13px; color: var(--text-3);
+    width: 300px; display: inline-block;
+  }
+  .input-demo.focus { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); color: var(--text-1); }
+  .chip { display: inline-flex; align-items: center; border-radius: 999px; padding: 7px 14px; font-size: 12px; font-weight: 600; background: var(--inset); box-shadow: inset 0 0 0 1px var(--border-faint); }
+  .chip.selected { background: var(--accent-soft); box-shadow: none; }
+  .badge { display: inline-block; border-radius: 6px; padding: 3px 10px; font-size: 11.5px; font-weight: 600; }
+  .empty-demo { border: 1px dashed var(--border-soft); border-radius: var(--r-l); padding: 30px; text-align: center; color: var(--text-2); font-size: 12.5px; background: var(--inset); }
+
+  /* ---------- 8. 动效 ---------- */
+  .motion-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .motion-card { background: var(--panel); border: 1px solid var(--border-faint); border-radius: var(--r-l); padding: 16px 18px; }
+  .motion-card b { font-size: 13.5px; }
+  .motion-card .t { font-family: Consolas, monospace; font-size: 12px; color: var(--accent); margin: 4px 0 6px; }
+  .motion-card p { font-size: 12px; color: var(--text-2); }
+
+  code { font-family: Consolas, monospace; background: var(--code-bg); padding: 1.5px 6px; border-radius: 6px; font-size: 12px; }
+  .footnote { margin-top: 64px; padding-top: 20px; border-top: 1px solid #D8DAD2; color: var(--text-3); font-size: 12px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="doc-header">
+    <div class="doc-kicker">研LIFE DESIGN SYSTEM · V1.0 草案</div>
+    <h1>前端风格预览</h1>
+    <p>本页是 <code>frontend_style_guide.md</code> 的可视化配套：所有色值、圆角、字阶均直接取自 <code>lib/core/theme/app_tokens.dart</code>（green 学术绿默认主题），用于设计评审基线。</p>
+  </header>
+
+  <!-- ================= 1. App Shell ================= -->
+  <section class="doc">
+    <h2>1 · 应用壳层（App Shell）</h2>
+    <p class="desc">渐变窗口底色 + 深色侧边导航锚点 + 圆角内容壳（28px）+ 轻投影。侧栏展开 232 / 折叠 80，内容区间距 20。</p>
+    <div class="shell-mock">
+      <div class="mock-sidebar">
+        <div class="mock-logo-row"><div class="mock-logo">研</div></div>
+        <div class="mock-appname">研究生活</div>
+        <div class="mock-nav">
+          <div class="mock-nav-item selected"><span class="ico">⌂</span>首页</div>
+          <div class="mock-nav-item"><span class="ico">▦</span>日历</div>
+          <div class="mock-nav-item"><span class="ico">✦</span>智能体</div>
+          <div class="mock-nav-group"><span>学研工作</span><span>▾</span></div>
+          <div class="mock-nav-item nested"><span class="ico">▤</span>阅读</div>
+          <div class="mock-nav-item nested"><span class="ico">✎</span>笔记</div>
+          <div class="mock-nav-item nested"><span class="ico">◔</span>周分析</div>
+          <div class="mock-nav-item nested"><span class="ico">♟</span>人物</div>
+          <div class="mock-nav-group"><span>资料工具</span><span>▸</span></div>
+          <div class="mock-nav-group"><span>校园生活</span><span>▸</span></div>
+        </div>
+        <div class="mock-nav-item" style="border-top:1px solid rgba(255,255,255,.1); border-radius:0; margin-top:8px;"><span class="ico">↺</span>历史</div>
+        <div class="mock-nav-item"><span class="ico">⚙</span>设置</div>
+      </div>
+      <div class="mock-content">
+        <div class="mock-page-head">
+          <h3>周分析</h3>
+          <p>导入本周记录，本地 LLM 优先生成结构化回顾</p>
+        </div>
+        <div class="mock-cards">
+          <div class="mock-card">
+            <h4>本周概览</h4>
+            <div class="sub">5 月 11 日 – 5 月 17 日</div>
+            <div class="mock-stat-row">
+              <div class="mock-stat"><b>6</b><span>科研会话</span></div>
+              <div class="mock-stat"><b>12.5h</b><span>专注时长</span></div>
+              <div class="mock-stat"><b>3</b><span>新人物</span></div>
+            </div>
+          </div>
+          <div class="mock-card">
+            <h4>快速操作</h4>
+            <div class="sub">高频入口置顶，说明后置</div>
+            <div class="btn-row" style="margin-top:14px;">
+              <button class="btn btn-filled">导入周记</button>
+              <button class="btn btn-outlined">查看历史</button>
+            </div>
+            <div style="margin-top:14px;"><span class="weather-pill"><span class="dot"></span>晴 · 26°C · 杭州</span></div>
+          </div>
+        </div>
+        <div class="mock-card">
+          <h4>卡片三级面板</h4>
+          <div class="sub">panelSurface 卡片底 / panelSubtle 数据井 / panelAccent 激活面（右侧示例）</div>
+          <div class="mock-stat-row">
+            <div class="mock-stat" style="background:var(--panel-accent);"><b style="color:var(--accent);">激活</b><span>panelAccent</span></div>
+            <div class="mock-stat"><b>常规</b><span>panelSubtle</span></div>
+            <div class="mock-stat" style="background:var(--inset); border:1px solid var(--border-faint);"><b>内嵌</b><span>insetSurface</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 2. 主题族 ================= -->
+  <section class="doc">
+    <h2>2 · 主题族（6 套）</h2>
+    <p class="desc">每套主题共享同一令牌结构。色条依次：侧栏深色 / 强调色 / 面板底 / 暖色点缀。green 为默认主题。</p>
+    <div class="theme-row">
+      <div class="theme-chip default">
+        <div class="bar"><i style="background:#18392C"></i><i style="background:#2F6B4B"></i><i style="background:#EAF4EB"></i><i style="background:#C9A56A"></i></div>
+        <div class="meta"><b>学术绿</b><span>green · 默认</span></div>
+      </div>
+      <div class="theme-chip">
+        <div class="bar"><i style="background:#4C2035"></i><i style="background:#B23C72"></i><i style="background:#F7E6EF"></i><i style="background:#C59858"></i></div>
+        <div class="meta"><b>樱粉</b><span>pink</span></div>
+      </div>
+      <div class="theme-chip">
+        <div class="bar"><i style="background:#173654"></i><i style="background:#256AA6"></i><i style="background:#E6F0FA"></i><i style="background:#C29255"></i></div>
+        <div class="meta"><b>雾蓝</b><span>blue</span></div>
+      </div>
+      <div class="theme-chip">
+        <div class="bar"><i style="background:#102A43"></i><i style="background:#165DFF"></i><i style="background:#F2F8FF"></i><i style="background:#D69220"></i></div>
+        <div class="meta"><b>OJ 蓝白</b><span>ojBlue · 小圆角</span></div>
+      </div>
+      <div class="theme-chip">
+        <div class="bar"><i style="background:#2B2F33"></i><i style="background:#30363D"></i><i style="background:#E9E9E5"></i><i style="background:#B28A4A"></i></div>
+        <div class="meta"><b>素白</b><span>white</span></div>
+      </div>
+      <div class="theme-chip">
+        <div class="bar"><i style="background:#070809"></i><i style="background:#63758A"></i><i style="background:#262B31"></i><i style="background:#C3A46C"></i></div>
+        <div class="meta"><b>墨黑</b><span>black · 暗色</span></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 3. 令牌分层 ================= -->
+  <section class="doc">
+    <h2>3 · 色彩令牌分层</h2>
+    <p class="desc">从窗口底色到文本共 9 层。规则：页面背景只许取 canvas / backdrop / panel 系；内嵌控件明度最低，内容面板最亮。</p>
+    <div class="layer-stack">
+      <div class="layer" style="background:linear-gradient(135deg,#F8FBF7,#EEF5F0);">
+        <div><div class="name">backdrop × 3</div><div class="role">窗口级渐变底色</div></div>
+        <div class="swatches spaced">
+          <div class="sw" style="background:#F8FBF7"><small>top</small></div>
+          <div class="sw" style="background:#EEF5F0"><small>mid</small></div>
+          <div class="sw" style="background:#F9FAF8"><small>bot</small></div>
+        </div>
+      </div>
+      <div class="layer">
+        <div><div class="name">shell / sidebar</div><div class="role">壳层大面板 · 深色导航锚点</div></div>
+        <div class="swatches spaced">
+          <div class="sw" style="background:#FDFEFC"><small>shell</small></div>
+          <div class="sw" style="background:#18392C"><small>sidebar</small></div>
+          <div class="sw" style="background:#11291F"><small>strong</small></div>
+        </div>
+      </div>
+      <div class="layer">
+        <div><div class="name">panel × 3 / inset</div><div class="role">卡片三级 + 内嵌控件底</div></div>
+        <div class="swatches spaced">
+          <div class="sw" style="background:#FFFFFF"><small>surface</small></div>
+          <div class="sw" style="background:#F4F8F3"><small>subtle</small></div>
+          <div class="sw" style="background:#EAF4EB"><small>accent</small></div>
+          <div class="sw" style="background:#FBFCFA"><small>inset</small></div>
+        </div>
+      </div>
+      <div class="layer">
+        <div><div class="name">border / text</div><div class="role">边框两档 · 文本三档</div></div>
+        <div class="swatches spaced">
+          <div class="sw" style="background:#DDE6DE"><small>soft</small></div>
+          <div class="sw" style="background:#E8EEE8"><small>faint</small></div>
+          <div class="sw" style="background:#183129"><small>text1</small></div>
+          <div class="sw" style="background:#617066"><small>text2</small></div>
+          <div class="sw" style="background:#8B978F"><small>text3</small></div>
+        </div>
+      </div>
+      <div class="layer">
+        <div><div class="name">accent × 3 / warmAccent</div><div class="role">强调三态 · 暖色仅生活语境</div></div>
+        <div class="swatches spaced">
+          <div class="sw" style="background:#2F6B4B"><small>accent</small></div>
+          <div class="sw" style="background:#255A3F"><small>hover</small></div>
+          <div class="sw" style="background:#DCEBDE"><small>soft</small></div>
+          <div class="sw" style="background:#C9A56A"><small>warm</small></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 4. 语义色（规划） ================= -->
+  <section class="doc">
+    <h2>4 · 语义色（规划补齐 · P0）</h2>
+    <p class="desc">独立于主题强调色，切主题时不变（仅暗色做明度适配），保证状态含义稳定。</p>
+    <div class="sem-grid">
+      <div class="sem-card"><span class="pill" style="background:var(--success-soft); color:var(--success);">● success</span><p>同步成功 · 备份完成 · 分析写入成功<br><code>#2E7D4F</code></p></div>
+      <div class="sem-card"><span class="pill" style="background:var(--warning-soft); color:var(--warning);">● warning</span><p>同步冲突 · 存储不足 · Ollama 未启动<br><code>#C98A2D</code></p></div>
+      <div class="sem-card"><span class="pill" style="background:var(--danger-soft); color:var(--danger);">● danger</span><p>删除确认 · 同步失败 · 登录过期<br><code>#C04545</code></p></div>
+      <div class="sem-card"><span class="pill" style="background:var(--accent-soft); color:var(--accent);">● info</span><p>普通提示条，复用 accent 系<br><code>= accent</code></p></div>
+    </div>
+  </section>
+
+  <!-- ================= 5. 字阶 ================= -->
+  <section class="doc">
+    <h2>5 · 字体排印</h2>
+    <p class="desc">桌面端正文基准 14px；负字距仅 headline 两级；标题 w600、正文 w400，不引入额外字重。</p>
+    <div class="type-table">
+      <div class="type-row"><span class="tk">headlineMedium</span><span class="spec">28 · w600 · 1.15</span><span class="demo" style="font-size:28px; font-weight:600; letter-spacing:-0.5px;">页面主标题</span></div>
+      <div class="type-row"><span class="tk">headlineSmall</span><span class="spec">22 · w600 · 1.2</span><span class="demo" style="font-size:22px; font-weight:600; letter-spacing:-0.3px;">页面副标题</span></div>
+      <div class="type-row"><span class="tk">titleLarge</span><span class="spec">17 · w600 · 1.25</span><span class="demo" style="font-size:17px; font-weight:600;">卡片标题 SectionCard</span></div>
+      <div class="type-row"><span class="tk">titleMedium</span><span class="spec">15 · w500 · 1.25</span><span class="demo" style="font-size:15px; font-weight:500;">区块小标题 / 按钮文字</span></div>
+      <div class="type-row"><span class="tk">bodyLarge</span><span class="spec">14 · w400 · 1.55</span><span class="demo" style="font-size:14px;">正文基准：打通文献、笔记、思考与任务。</span></div>
+      <div class="type-row"><span class="tk">bodyMedium</span><span class="spec">13 · w400 · 1.55</span><span class="demo" style="font-size:13px;">次级正文，列表行内容。</span></div>
+      <div class="type-row"><span class="tk">bodySmall</span><span class="spec">12 · w400 · 1.45</span><span class="demo" style="font-size:12px; color:#617066;">辅助说明 · 时间戳 2026-05-15 14:30</span></div>
+      <div class="type-row"><span class="tk">labelLarge</span><span class="spec">12 · w600 · 1.2</span><span class="demo" style="font-size:12px; font-weight:600;">标签 · 徽标 · 侧栏导航项</span></div>
+    </div>
+  </section>
+
+  <!-- ================= 6. 形状 ================= -->
+  <section class="doc">
+    <h2>6 · 圆角 · 阴影 · 间距</h2>
+    <p class="desc">圆角四档固定；阴影两档已有 + 浮层档（规划）；间距以 4 为基数（规划补齐 AppSpacing）。</p>
+    <div class="shape-grid">
+      <div class="shape-box" style="border-radius:12px; background:var(--panel-subtle);">radiusSmall · 12<br>按钮</div>
+      <div class="shape-box" style="border-radius:16px; background:var(--panel-subtle);">radiusMedium · 16<br>输入框 / 导航项</div>
+      <div class="shape-box" style="border-radius:20px; background:var(--panel-subtle);">radiusLarge · 20<br>卡片</div>
+      <div class="shape-box" style="border-radius:24px; background:var(--panel-subtle);">radiusXLarge · 24<br>对话框（壳层 28）</div>
+    </div>
+    <div class="shadow-grid">
+      <div class="shadow-box" style="box-shadow:var(--shadow-sm);">shadowSm · 卡片</div>
+      <div class="shadow-box" style="box-shadow:var(--shadow-md);">shadowMd · 壳层 / 侧栏</div>
+      <div class="shadow-box" style="box-shadow:var(--shadow-lg);">shadowLg（规划）· 浮层</div>
+    </div>
+    <div class="space-row">
+      <div class="space-item"><i style="width:4px; height:20px;"></i><span>x1 · 4</span></div>
+      <div class="space-item"><i style="width:8px; height:20px;"></i><span>x2 · 8</span></div>
+      <div class="space-item"><i style="width:12px; height:20px;"></i><span>x3 · 12</span></div>
+      <div class="space-item"><i style="width:16px; height:20px;"></i><span>x4 · 16</span></div>
+      <div class="space-item"><i style="width:20px; height:20px;"></i><span>x5 · 20</span></div>
+      <div class="space-item"><i style="width:24px; height:20px;"></i><span>x6 · 24</span></div>
+      <div class="space-item"><i style="width:32px; height:20px;"></i><span>x8 · 32</span></div>
+    </div>
+  </section>
+
+  <!-- ================= 7. 组件 ================= -->
+  <section class="doc">
+    <h2>7 · 组件小样</h2>
+    <p class="desc">按钮 / 输入 / 选择 / 反馈四类基础件，样式对应 <code>app_theme.dart</code> 中已主题化的定义。</p>
+    <div class="comp-stage">
+      <div class="comp-group">
+        <h5>按钮</h5>
+        <div class="btn-row">
+          <button class="btn btn-filled">主要按钮</button>
+          <button class="btn btn-filled hover">悬停态</button>
+          <button class="btn btn-outlined">次要按钮</button>
+          <button class="btn btn-text">文字按钮</button>
+          <button class="btn btn-danger">危险操作</button>
+          <button class="btn disabled">禁用</button>
+        </div>
+      </div>
+      <div class="comp-group">
+        <h5>输入框</h5>
+        <div class="btn-row">
+          <span class="input-demo">请输入周记标题…</span>
+          <span class="input-demo focus">聚焦：1.4px accent 描边</span>
+        </div>
+      </div>
+      <div class="comp-group">
+        <h5>选择 / 标签</h5>
+        <div class="btn-row">
+          <span class="chip selected">已选 chip</span>
+          <span class="chip">未选 chip</span>
+          <span class="badge" style="background:var(--accent-soft); color:var(--accent);">进行中</span>
+          <span class="badge" style="background:var(--success-soft); color:var(--success);">已同步</span>
+          <span class="badge" style="background:var(--warning-soft); color:var(--warning);">有冲突</span>
+          <span class="badge" style="background:var(--danger-soft); color:var(--danger);">同步失败</span>
+        </div>
+      </div>
+      <div class="comp-group">
+        <h5>反馈</h5>
+        <div class="empty-demo">空态（EmptyState）—— 插画位 + 一句引导 + 一个主操作，不复用大段说明文字</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ================= 8. 动效 ================= -->
+  <section class="doc">
+    <h2>8 · 动效（规划令牌）</h2>
+    <p class="desc">功能动效 ≤ 200ms 不循环；氛围动效（天气、桌宠）慢速循环且必须可被设置关闭。</p>
+    <div class="motion-grid">
+      <div class="motion-card"><b>durationFast</b><div class="t">120ms</div><p>hover、press、tooltip 等即时反馈</p></div>
+      <div class="motion-card"><b>durationNormal</b><div class="t">200ms</div><p>面板展开收起、tab 与导航切换</p></div>
+      <div class="motion-card"><b>durationSlow</b><div class="t">320ms</div><p>页面级过渡、对话框进出</p></div>
+    </div>
+  </section>
+
+  <!-- ================= 9. 页面模式 ================= -->
+  <section class="doc">
+    <h2>9 · 页面风格模式</h2>
+    <p class="desc">六种模式覆盖全部 16 个 feature，新页面先选模式再动工。</p>
+    <div class="grid" style="grid-template-columns: repeat(3, 1fr);">
+      <div class="mock-card"><h4>仪表盘</h4><div class="sub">首页</div><p style="font-size:12.5px; color:var(--text-2); margin-top:8px;">无面板全幅背景 + 浮动元素；允许氛围动效</p></div>
+      <div class="mock-card"><h4>工作面板</h4><div class="sub">分析 / 日历 / 人物 / 历史</div><p style="font-size:12.5px; color:var(--text-2); margin-top:8px;">PageScaffold + SectionCard 流式堆叠，限宽 1080 居中</p></div>
+      <div class="mock-card"><h4>阅读沉浸</h4><div class="sub">阅读 / 文档查看</div><p style="font-size:12.5px; color:var(--text-2); margin-top:8px;">内容最大化，工具栏可收起，行高 1.7</p></div>
+      <div class="mock-card"><h4>工具台</h4><div class="sub">PDF 工具 / 文件</div><p style="font-size:12.5px; color:var(--text-2); margin-top:8px;">左列表右详情双栏，列表栏 280–320</p></div>
+      <div class="mock-card"><h4>表单 / 目录</h4><div class="sub">设置 / 登录</div><p style="font-size:12.5px; color:var(--text-2); margin-top:8px;">设置走注册表规范；登录居中单卡 ≤ 420 宽</p></div>
+      <div class="mock-card"><h4>覆盖层</h4><div class="sub">桌宠 / 对话框</div><p style="font-size:12.5px; color:var(--text-2); margin-top:8px;">壳层之上，shadowLg，不打断主流程</p></div>
+    </div>
+  </section>
+
+  <footer class="footnote">
+    研LIFE 前端风格预览 · 配套文档 <code>docs/frontend_style_guide.md</code> · 色值来源 <code>lib/core/theme/app_tokens.dart</code>（green）· 生成于 2026-08-02
+  </footer>
+
+</div>
+</body>
+</html>

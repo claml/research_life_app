@@ -1,0 +1,7 @@
+.vs/
+.idea/
+.tmp/
+.research_life/
+应用/
+*.log
+*.tmp

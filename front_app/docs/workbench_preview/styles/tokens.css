@@ -1,0 +1,47 @@
+:root {
+  color-scheme: light;
+  --font-sans: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+
+  --canvas-sky-light: #b8ccca;
+  --canvas-sky: #8eaca9;
+  --canvas-sky-deep: #477d7c;
+  --sidebar: #0f6657;
+  --sidebar-deep: #0b5a4d;
+  --sidebar-selected: rgb(159 196 186 / 36%);
+  --accent: #087d68;
+  --accent-strong: #076c5b;
+  --surface-main: #f8faf9;
+  --surface-secondary: #f1f5f4;
+  --surface-opaque-glass: #e8f0ee;
+  --surface-opaque-weather: #547b77;
+  --surface-opaque-search: #3a776b;
+  --surface-opaque-reveal: #527974;
+  --text: #13202b;
+  --text-muted: #71808e;
+  --text-on-dark: #f7fbfa;
+  --border: #dbe3e4;
+  --border-on-dark: rgb(255 255 255 / 34%);
+  --weather-amber: #f5c94b;
+  --danger: #bd4d50;
+  --success: #2d8a68;
+
+  --space-1: 8px;
+  --space-2: 16px;
+  --space-3: 24px;
+  --space-4: 32px;
+  --space-5: 40px;
+  --space-6: 48px;
+  --space-7: 56px;
+  --space-8: 64px;
+
+  --radius-control: 10px;
+  --radius-panel: 14px;
+  --radius-shell: 20px;
+  --shadow-shell: 0 18px 42px rgb(33 65 65 / 15%);
+  --shadow-float: 0 7px 20px rgb(24 54 54 / 13%);
+  --blur-control: 14px;
+  --blur-weather: 20px;
+  --motion-control: 140ms;
+  --motion-chrome: 200ms;
+  --motion-panel: 220ms;
+}
