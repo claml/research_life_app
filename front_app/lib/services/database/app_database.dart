@@ -186,6 +186,25 @@ class SyncCursors extends Table {
   Set<Column<Object>> get primaryKey => {scope};
 }
 
+class AgentChatSessions extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  TextColumn get title => text()();
+  TextColumn get profileId => text()();
+  TextColumn get model => text()();
+  IntColumn get createdAt => integer()();
+  IntColumn get updatedAt => integer()();
+}
+
+class AgentChatMessages extends Table {
+  IntColumn get id => integer().autoIncrement()();
+  IntColumn get sessionId => integer().references(AgentChatSessions, #id)();
+  TextColumn get role => text()();
+  TextColumn get content => text()();
+  TextColumn get reasoningContent => text().nullable()();
+  TextColumn get model => text().nullable()();
+  IntColumn get createdAt => integer()();
+}
+
 @DriftDatabase(
   tables: [
     Preferences,
@@ -200,12 +219,14 @@ class SyncCursors extends Table {
     PdfLibraryAnnotations,
     SyncOutbox,
     SyncCursors,
+    AgentChatSessions,
+    AgentChatMessages,
   ],
 )
 class AppDatabase extends _$AppDatabase {
   AppDatabase(super.executor);
 
-  static const currentSchemaVersion = 8;
+  static const currentSchemaVersion = 9;
 
   @override
   int get schemaVersion => currentSchemaVersion;
@@ -294,6 +315,10 @@ class AppDatabase extends _$AppDatabase {
         }
         if (from < 8) {
           await migrator.createTable(notes);
+        }
+        if (from < 9) {
+          await migrator.createTable(agentChatSessions);
+          await migrator.createTable(agentChatMessages);
         }
       },
     );
