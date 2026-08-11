@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:drift/native.dart';
@@ -154,26 +155,47 @@ void main() {
     expect(reply.assistantMessage.sessionId, 7);
   });
 
-  test(
-    'schema fixtures and generated helper cannot silently go stale',
-    () async {
-      for (final version in [8, 9]) {
-        final authoritative = await File(
-          'drift_schemas/schema_v$version.json',
-        ).readAsBytes();
-        final driftAlias = await File(
-          'drift_schemas/drift_schema_v$version.json',
-        ).readAsBytes();
+  test('schema fixtures and generated helper cannot silently go stale', () async {
+    expect(GeneratedHelper.versions, orderedEquals([8, 9]));
+    final verifier = SchemaVerifier(GeneratedHelper());
+
+    for (final version in [8, 9]) {
+      final authoritative = await File(
+        'drift_schemas/schema_v$version.json',
+      ).readAsBytes();
+      final driftAlias = await File(
+        'drift_schemas/drift_schema_v$version.json',
+      ).readAsBytes();
+
+      final generatedSchema = await verifier.schemaAt(version);
+      try {
+        final generatedTables = <String, String>{
+          for (final row in generatedSchema.rawDatabase.select(
+            "SELECT name, sql FROM sqlite_schema "
+            "WHERE type = 'table' AND name NOT LIKE 'sqlite_%' "
+            'ORDER BY name',
+          ))
+            row['name'] as String: _normalizeCreateTableSql(
+              row['sql'] as String,
+            ),
+        };
         expect(
-          driftAlias,
-          orderedEquals(authoritative),
-          reason: 'schema v$version fixture aliases must be byte-identical',
+          generatedTables,
+          equals(_fixedSqlTables(authoritative)),
+          reason:
+              'generated schema v$version must match its authoritative fixture',
         );
+      } finally {
+        generatedSchema.close();
       }
 
-      expect(GeneratedHelper.versions, orderedEquals([8, 9]));
-    },
-  );
+      expect(
+        driftAlias,
+        orderedEquals(authoritative),
+        reason: 'schema v$version fixture aliases must be byte-identical',
+      );
+    }
+  });
 
   test(
     'schema 8 migrates to schema 9 without changing existing rows',
@@ -212,4 +234,38 @@ Future<AgentChatSession> _seededSession(AgentChatRepository repository) async {
     content: '问题',
   );
   return session;
+}
+
+Map<String, String> _fixedSqlTables(List<int> fixtureBytes) {
+  final fixture = jsonDecode(utf8.decode(fixtureBytes)) as Map<String, dynamic>;
+  final fixedSql = fixture['fixed_sql'] as List<dynamic>;
+  return <String, String>{
+    for (final entry in fixedSql.cast<Map<String, dynamic>>())
+      entry['name'] as String: _normalizeCreateTableSql(
+        ((entry['sql'] as List<dynamic>)
+                .cast<Map<String, dynamic>>()
+                .singleWhere(
+                  (statement) => statement['dialect'] == 'sqlite',
+                ))['sql']
+            as String,
+      ),
+  };
+}
+
+String _normalizeCreateTableSql(String sql) {
+  return sql
+      .replaceFirst(
+        RegExp(r'^CREATE TABLE IF NOT EXISTS\s+', caseSensitive: false),
+        'CREATE TABLE ',
+      )
+      .replaceAllMapped(
+        RegExp(r'"([A-Za-z_][A-Za-z0-9_]*)"'),
+        (match) => match.group(1)!,
+      )
+      .replaceAll(RegExp(r'\s+'), ' ')
+      .replaceAll(RegExp(r'\s*\(\s*'), '(')
+      .replaceAll(RegExp(r'\s*\)\s*'), ')')
+      .replaceAll(RegExp(r'\s*,\s*'), ',')
+      .replaceFirst(RegExp(r';$'), '')
+      .trim();
 }
