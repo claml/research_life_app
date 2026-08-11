@@ -134,27 +134,6 @@ void main() {
     },
   );
 
-  test('legacy remote model decoding remains available until task 5', () {
-    final reply = AgentChatReply.fromJson({
-      'session': {
-        'id': 7,
-        'title': 'legacy',
-        'mode': 'expert',
-        'updateTime': '2026-08-11T12:00:00.000Z',
-      },
-      'userMessage': {'id': 8, 'role': 'user', 'content': 'question'},
-      'assistantMessage': {'id': 9, 'role': 'assistant', 'content': 'answer'},
-    });
-
-    expect(reply.session.id, 7);
-    expect(reply.session.mode, 'expert');
-    expect(reply.session.updateTime, DateTime.utc(2026, 8, 11, 12));
-    expect(reply.userMessage.id, 8);
-    expect(reply.userMessage.sessionId, 7);
-    expect(reply.assistantMessage.id, 9);
-    expect(reply.assistantMessage.sessionId, 7);
-  });
-
   test('schema fixtures and generated helper cannot silently go stale', () async {
     expect(GeneratedHelper.versions, orderedEquals([8, 9]));
     final verifier = SchemaVerifier(GeneratedHelper());

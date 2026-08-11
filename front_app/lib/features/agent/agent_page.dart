@@ -3,17 +3,15 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../app/auth_scope.dart';
 import '../../app/research_life_scope.dart';
-import '../../core/network/api_client.dart';
 import '../../core/theme/app_tokens.dart';
-import '../../services/agent/agent_api.dart';
 import '../../services/agent/agent_models.dart';
-import '../../state/auth_controller.dart';
 import 'state/agent_controller.dart';
 
 class AgentPage extends StatefulWidget {
-  const AgentPage({super.key});
+  const AgentPage({super.key, this.controller});
+
+  final AgentController? controller;
 
   @override
   State<AgentPage> createState() => _AgentPageState();
@@ -55,17 +53,11 @@ class _AgentPageState extends State<AgentPage> {
 
   @override
   Widget build(BuildContext context) {
-    final auth = AuthScope.read(context);
-    final life = ResearchLifeScope.read(context);
-
-    _controller ??= AgentController(
-      api: AgentApi(
-        ApiClient(
-          accessTokenReader: () => AuthController.accessToken,
-          onUnauthorized: auth.refreshSessionAfterUnauthorized,
-        ),
-      ),
-    )..bootstrap();
+    final injectedController = widget.controller;
+    if (injectedController == null) {
+      return const SizedBox.shrink();
+    }
+    _controller ??= injectedController..bootstrap();
 
     return AnimatedBuilder(
       animation: _controller!,
@@ -132,10 +124,7 @@ class _AgentPageState extends State<AgentPage> {
                       onSend: () async {
                         final text = _inputController.text;
                         _inputController.clear();
-                        await controller.sendMessage(
-                          text,
-                          llmSettings: life.agentLlmSettings,
-                        );
+                        await controller.sendMessage(text);
                         if (_scrollController.hasClients) {
                           await Future<void>.delayed(
                             const Duration(milliseconds: 80),
