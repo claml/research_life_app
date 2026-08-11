@@ -87,6 +87,54 @@ void main() {
     expect(await repository.loadActive(), isNull);
   });
 
+  test(
+    'saveActive rejects a pure-whitespace profile field without writing',
+    () async {
+      final invalidProfile = AiProviderProfile(
+        id: ' ',
+        provider: 'deepseek',
+        displayName: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com',
+        model: 'deepseek-v4-flash',
+        requiresCredential: true,
+      );
+
+      await expectLater(
+        repository.saveActive(invalidProfile),
+        throwsFormatException,
+      );
+
+      expect(
+        await preferences.loadString(PreferencesRepository.localAiProfileV1Key),
+        isNull,
+      );
+    },
+  );
+
+  test(
+    'saveActive rejects a profile field with surrounding whitespace without writing',
+    () async {
+      final invalidProfile = AiProviderProfile(
+        id: 'primary',
+        provider: 'deepseek',
+        displayName: 'DeepSeek',
+        baseUrl: ' https://api.deepseek.com ',
+        model: 'deepseek-v4-flash',
+        requiresCredential: true,
+      );
+
+      await expectLater(
+        repository.saveActive(invalidProfile),
+        throwsFormatException,
+      );
+
+      expect(
+        await preferences.loadString(PreferencesRepository.localAiProfileV1Key),
+        isNull,
+      );
+    },
+  );
+
   test('saveActive waits for the preferences coordinator lease', () async {
     final coordinator = LocalDataOperationCoordinator();
     final coordinatedPreferences = PreferencesRepository(

@@ -22,10 +22,11 @@ final class AiProfileRepository {
     return AiProviderProfile.fromJson(Map<String, Object?>.from(decoded));
   }
 
-  Future<void> saveActive(AiProviderProfile profile) {
-    return _preferences.saveString(
+  Future<void> saveActive(AiProviderProfile profile) async {
+    final validatedProfile = AiProviderProfile.fromJson(profile.toJson());
+    await _preferences.saveString(
       PreferencesRepository.localAiProfileV1Key,
-      jsonEncode(profile.toJson()),
+      jsonEncode(validatedProfile.toJson()),
     );
   }
 
