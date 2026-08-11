@@ -43,8 +43,9 @@ class AgentController extends ChangeNotifier {
   int? currentSessionId;
   AgentChatMessage? volatileAssistantMessage;
 
-  int? _failedUserMessageId;
+  final Map<int, int> _failedUserMessageIds = <int, int>{};
   _PendingSessionUpdate? _pendingSessionUpdate;
+  Future<bool>? _volatileRecoveryFuture;
   _AgentOperation? _activeOperation;
   int _nextOperationId = 0;
   int _messageLoadGeneration = 0;
@@ -58,7 +59,12 @@ class AgentController extends ChangeNotifier {
         (activeProfile.requiresCredential && !hasCredential);
   }
 
-  bool get canRetry => _failedUserMessageId != null && !sending;
+  bool get canRetry {
+    final sessionId = currentSessionId;
+    return sessionId != null &&
+        _failedUserMessageIds.containsKey(sessionId) &&
+        !sending;
+  }
 
   AgentChatSession? get currentSession {
     final sessionId = currentSessionId;
@@ -197,9 +203,10 @@ class AgentController extends ChangeNotifier {
   }
 
   Future<void> startNewSession() async {
-    if (sending) return;
+    if (sending || _disposed) return;
+    final generation = ++_messageLoadGeneration;
     if (!await _persistVolatileAssistant()) return;
-    ++_messageLoadGeneration;
+    if (_disposed || generation != _messageLoadGeneration) return;
     currentSessionId = null;
     messages.clear();
     error = null;
@@ -208,9 +215,10 @@ class AgentController extends ChangeNotifier {
   }
 
   Future<void> openSession(int sessionId) async {
-    if (sending) return;
-    if (!await _persistVolatileAssistant()) return;
+    if (sending || _disposed) return;
     final generation = ++_messageLoadGeneration;
+    if (!await _persistVolatileAssistant()) return;
+    if (_disposed || generation != _messageLoadGeneration) return;
     currentSessionId = sessionId;
     loadingMessages = true;
     error = null;
@@ -252,6 +260,7 @@ class AgentController extends ChangeNotifier {
     error = null;
     try {
       await _chats.deleteSession(sessionId);
+      _failedUserMessageIds.remove(sessionId);
       sessions.removeWhere((session) => session.id == sessionId);
       if (_disposed || generation != _messageLoadGeneration) return;
       if (currentSessionId == sessionId) {
@@ -279,7 +288,9 @@ class AgentController extends ChangeNotifier {
   Future<void> sendMessage(String content) async {
     final trimmed = content.trim();
     if (trimmed.isEmpty || sending || _disposed) return;
-    if (_failedUserMessageId != null) {
+    final activeSessionId = currentSessionId;
+    if (activeSessionId != null &&
+        _failedUserMessageIds.containsKey(activeSessionId)) {
       error = '请先重试上一条消息。';
       _notify();
       return;
@@ -316,7 +327,7 @@ class AgentController extends ChangeNotifier {
           content: trimmed,
         );
         messages.add(userMessage);
-        _failedUserMessageId = userMessage.id;
+        _failedUserMessageIds[sessionId] = userMessage.id;
         if (_operationStopped(operation)) return;
 
         final context = await _chats.listMessages(sessionId);
@@ -340,8 +351,10 @@ class AgentController extends ChangeNotifier {
   }
 
   Future<void> retryFailedMessage() async {
-    final failedId = _failedUserMessageId;
     final sessionId = currentSessionId;
+    final failedId = sessionId == null
+        ? null
+        : _failedUserMessageIds[sessionId];
     if (sending || _disposed) return;
     if (failedId == null && volatileAssistantMessage == null) return;
 
@@ -477,7 +490,7 @@ class AgentController extends ChangeNotifier {
       );
       volatileAssistantMessage = volatileMessage;
       messages.add(volatileMessage);
-      _failedUserMessageId = null;
+      _failedUserMessageIds.remove(sessionId);
       if (!_operationStopped(operation)) {
         error = '回答已生成，但未能写入本地历史。';
       }
@@ -486,7 +499,7 @@ class AgentController extends ChangeNotifier {
 
     messages.add(assistantMessage);
     volatileAssistantMessage = null;
-    _failedUserMessageId = null;
+    _failedUserMessageIds.remove(sessionId);
     final pendingUpdate = _PendingSessionUpdate(
       sessionId: sessionId,
       userContent: userMessage.content,
@@ -501,7 +514,25 @@ class AgentController extends ChangeNotifier {
     }
   }
 
-  Future<bool> _persistVolatileAssistant({_AgentOperation? operation}) async {
+  Future<bool> _persistVolatileAssistant({_AgentOperation? operation}) {
+    final activeRecovery = _volatileRecoveryFuture;
+    if (activeRecovery != null) return activeRecovery;
+
+    late final Future<bool> recovery;
+    recovery = _persistVolatileAssistantOnce(operation: operation).whenComplete(
+      () {
+        if (identical(_volatileRecoveryFuture, recovery)) {
+          _volatileRecoveryFuture = null;
+        }
+      },
+    );
+    _volatileRecoveryFuture = recovery;
+    return recovery;
+  }
+
+  Future<bool> _persistVolatileAssistantOnce({
+    _AgentOperation? operation,
+  }) async {
     final pendingUpdate = _pendingSessionUpdate;
     if (pendingUpdate != null) {
       if (!await _updateSessionAfterAssistant(pendingUpdate)) {
@@ -547,6 +578,7 @@ class AgentController extends ChangeNotifier {
       messages.add(persisted);
     }
     volatileAssistantMessage = null;
+    _failedUserMessageIds.remove(persisted.sessionId);
 
     AgentChatMessage? firstUser;
     for (final message in messages) {
@@ -652,7 +684,6 @@ class AgentController extends ChangeNotifier {
   }
 
   void _clearTransientMessageState() {
-    _failedUserMessageId = null;
     _pendingSessionUpdate = null;
     volatileAssistantMessage = null;
   }

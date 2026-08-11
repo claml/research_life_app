@@ -323,6 +323,84 @@ void main() {
   );
 
   test(
+    'pending user remains retryable after navigating away and back',
+    () async {
+      await fixture.storeConfiguration();
+      final other = await fixture.chats.createSession(
+        profileId: remoteProfile.id,
+        model: remoteProfile.model,
+        title: 'Other session',
+      );
+      await fixture.chats.appendMessage(
+        sessionId: other.id,
+        role: 'user',
+        content: 'Other question',
+      );
+      await fixture.chats.appendMessage(
+        sessionId: other.id,
+        role: 'assistant',
+        content: 'Other answer',
+      );
+      await fixture.controller.bootstrap();
+      await fixture.controller.startNewSession();
+      fixture.chats.failNextMessageLoad = true;
+      fixture.adapter.replyNext('Recovered after navigation');
+
+      await fixture.controller.sendMessage('Pending in session A');
+
+      final pendingSessionId = fixture.controller.currentSessionId!;
+      final pendingBefore = await fixture.chats.listMessages(pendingSessionId);
+      final pendingUserId = pendingBefore.single.id;
+      await fixture.controller.openSession(other.id);
+      await fixture.controller.openSession(pendingSessionId);
+
+      expect(fixture.controller.canRetry, isTrue);
+      await fixture.controller.retryFailedMessage();
+
+      final stored = await fixture.chats.listMessages(pendingSessionId);
+      expect(stored.map((message) => message.role), ['user', 'assistant']);
+      expect(
+        stored.where((message) => message.isUser).map((message) => message.id),
+        [pendingUserId],
+      );
+      expect(fixture.adapter.calls, 1);
+      expect(fixture.adapter.jsonBodies.single['messages'], [
+        {'role': 'user', 'content': 'Pending in session A'},
+      ]);
+    },
+  );
+
+  test(
+    'pending user blocks a new send after navigating away and back',
+    () async {
+      await fixture.storeConfiguration();
+      await fixture.controller.bootstrap();
+      fixture.chats.failNextMessageLoad = true;
+
+      await fixture.controller.sendMessage('Pending in session A');
+
+      final pendingSessionId = fixture.controller.currentSessionId!;
+      final pendingUser = (await fixture.chats.listMessages(
+        pendingSessionId,
+      )).single;
+      await fixture.controller.startNewSession();
+      expect(fixture.controller.currentSessionId, isNull);
+      await fixture.controller.openSession(pendingSessionId);
+      fixture.adapter.replyNext('must not be used');
+
+      await fixture.controller.sendMessage('Do not append a second user');
+
+      final stored = await fixture.chats.listMessages(pendingSessionId);
+      expect(fixture.controller.canRetry, isTrue);
+      expect(fixture.controller.error, isNotNull);
+      expect(fixture.adapter.calls, 0);
+      expect(stored, hasLength(1));
+      expect(stored.single.id, pendingUser.id);
+      expect(stored.single.content, 'Pending in session A');
+    },
+  );
+
+  test(
     'profile save failure preserves durable and in-memory configuration',
     () async {
       await fixture.storeConfiguration(credential: 'old-key');
@@ -505,6 +583,42 @@ void main() {
     );
     expect(fixture.controller.messages.last.content, 'Stay visible');
   });
+
+  test(
+    'concurrent volatile recovery appends once and latest navigation wins',
+    () async {
+      await fixture.storeConfiguration();
+      final other = await fixture.chats.createSession(
+        profileId: remoteProfile.id,
+        model: remoteProfile.model,
+        title: 'Other session',
+      );
+      await fixture.controller.bootstrap();
+      await fixture.controller.startNewSession();
+      fixture.chats.failNextAssistantAppend = true;
+      fixture.adapter.replyNext('Recover exactly once');
+      await fixture.controller.sendMessage('Session A user');
+      final volatileSessionId = fixture.controller.currentSessionId!;
+      final assistantAppend = fixture.chats.blockNextAssistantAppend();
+
+      final openOther = fixture.controller.openSession(other.id);
+      await assistantAppend.started.future;
+      final startNew = fixture.controller.startNewSession();
+      await Future<void>.delayed(Duration.zero);
+      assistantAppend.release.complete();
+      await Future.wait([openOther, startNew]);
+
+      final stored = await fixture.chats.listMessages(volatileSessionId);
+      expect(stored.map((message) => message.role), ['user', 'assistant']);
+      expect(
+        stored.where((message) => message.isAssistant).single.content,
+        'Recover exactly once',
+      );
+      expect(fixture.controller.currentSessionId, isNull);
+      expect(fixture.controller.messages, isEmpty);
+      expect(fixture.controller.volatileAssistantMessage, isNull);
+    },
+  );
 
   test('blank credential retains the existing credential', () async {
     await fixture.storeConfiguration(credential: 'existing-key');
@@ -698,12 +812,19 @@ final class _ControlledChatStore implements AgentChatStore {
 
   final AgentChatRepository _delegate;
   final List<_MessageLoadGate> _messageLoadGates = <_MessageLoadGate>[];
+  _AsyncGate? _blockedAssistantAppend;
   bool failNextMessageLoad = false;
   bool failNextAssistantAppend = false;
 
   _AsyncGate blockNextMessageLoad({int? sessionId}) {
     final gate = _AsyncGate();
     _messageLoadGates.add(_MessageLoadGate(sessionId: sessionId, gate: gate));
+    return gate;
+  }
+
+  _AsyncGate blockNextAssistantAppend() {
+    final gate = _AsyncGate();
+    _blockedAssistantAppend = gate;
     return gate;
   }
 
@@ -714,12 +835,18 @@ final class _ControlledChatStore implements AgentChatStore {
     required String content,
     String? reasoningContent,
     String? model,
-  }) {
+  }) async {
     if (role == 'assistant' && failNextAssistantAppend) {
       failNextAssistantAppend = false;
-      return Future<AgentChatMessage>.error(
-        StateError('controlled assistant append failure'),
-      );
+      throw StateError('controlled assistant append failure');
+    }
+    if (role == 'assistant') {
+      final gate = _blockedAssistantAppend;
+      if (gate != null) {
+        _blockedAssistantAppend = null;
+        gate.started.complete();
+        await gate.release.future;
+      }
     }
     return _delegate.appendMessage(
       sessionId: sessionId,
