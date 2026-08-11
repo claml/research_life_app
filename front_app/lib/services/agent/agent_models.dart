@@ -107,6 +107,27 @@ class AgentChatMessage {
   }
 }
 
+final class AiChatTurn {
+  const AiChatTurn({required this.role, required this.content});
+
+  final String role;
+  final String content;
+}
+
+final class AiChatCompletion {
+  const AiChatCompletion({
+    required this.content,
+    this.reasoningContent,
+    this.model,
+    this.finishReason,
+  });
+
+  final String content;
+  final String? reasoningContent;
+  final String? model;
+  final String? finishReason;
+}
+
 @Deprecated('Temporary AgentApi compatibility; remove in Task 5.')
 class AgentChatReply {
   const AgentChatReply({
