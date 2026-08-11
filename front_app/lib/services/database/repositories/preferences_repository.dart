@@ -14,6 +14,7 @@ class PreferencesRepository {
   static const closeToTrayKey = 'closeToTray';
   static const remoteLlmAnalysisSettingsKey = 'remoteLlmAnalysisSettings';
   static const agentLlmSettingsKey = 'agentLlmSettings';
+  static const localAiProfileV1Key = 'localAiProfileV1';
   static const glassSettingsKey = 'glassSettings';
   static const calendarReminderEnabledKey = 'calendarReminderEnabled';
   static const pinLockKey = 'pinLock';
