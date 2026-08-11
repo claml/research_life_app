@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:drift/native.dart';
 import 'package:drift_dev/api/migrations_native.dart';
@@ -152,6 +153,27 @@ void main() {
     expect(reply.assistantMessage.id, 9);
     expect(reply.assistantMessage.sessionId, 7);
   });
+
+  test(
+    'schema fixtures and generated helper cannot silently go stale',
+    () async {
+      for (final version in [8, 9]) {
+        final authoritative = await File(
+          'drift_schemas/schema_v$version.json',
+        ).readAsBytes();
+        final driftAlias = await File(
+          'drift_schemas/drift_schema_v$version.json',
+        ).readAsBytes();
+        expect(
+          driftAlias,
+          orderedEquals(authoritative),
+          reason: 'schema v$version fixture aliases must be byte-identical',
+        );
+      }
+
+      expect(GeneratedHelper.versions, orderedEquals([8, 9]));
+    },
+  );
 
   test(
     'schema 8 migrates to schema 9 without changing existing rows',
