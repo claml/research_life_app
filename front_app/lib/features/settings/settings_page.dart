@@ -33,19 +33,13 @@ class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _remoteLlmBaseUrlController;
   late final TextEditingController _remoteLlmModelController;
   late final TextEditingController _remoteLlmApiKeyController;
-  late final TextEditingController _agentLlmBaseUrlController;
-  late final TextEditingController _agentLlmModelController;
-  late final TextEditingController _agentLlmApiKeyController;
   late final TextEditingController _weatherApiKeyController;
   late final TextEditingController _weatherApiHostController;
   String? _remoteLlmProviderValue;
   bool _remoteLlmApiKeyVisible = false;
-  String? _agentLlmProviderValue;
-  bool _agentLlmApiKeyVisible = false;
   bool _weatherApiKeyVisible = false;
   String? _syncedCalendarEditSessionId;
   String? _syncedRemoteLlmSettingsSignature;
-  String? _syncedAgentLlmSettingsSignature;
   String? _syncedWeatherSettingsSignature;
   String _settingsQuery = '';
   _SettingsCategory _selectedCategory = _SettingsCategory.all;
@@ -60,9 +54,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _remoteLlmBaseUrlController = TextEditingController();
     _remoteLlmModelController = TextEditingController();
     _remoteLlmApiKeyController = TextEditingController();
-    _agentLlmBaseUrlController = TextEditingController();
-    _agentLlmModelController = TextEditingController();
-    _agentLlmApiKeyController = TextEditingController();
     _weatherApiKeyController = TextEditingController();
     _weatherApiHostController = TextEditingController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -70,7 +61,6 @@ class _SettingsPageState extends State<SettingsPage> {
       unawaited(controller.ensureHomeGalleryReady());
       unawaited(controller.ensurePetCompanionLoaded());
       unawaited(controller.ensureRemoteLlmAnalysisSettingsLoaded());
-      unawaited(controller.ensureAgentLlmSettingsLoaded());
       unawaited(controller.ensureWeatherApiLoaded());
       unawaited(controller.refreshCloudSyncStatus());
     });
@@ -84,9 +74,6 @@ class _SettingsPageState extends State<SettingsPage> {
     _remoteLlmBaseUrlController.dispose();
     _remoteLlmModelController.dispose();
     _remoteLlmApiKeyController.dispose();
-    _agentLlmBaseUrlController.dispose();
-    _agentLlmModelController.dispose();
-    _agentLlmApiKeyController.dispose();
     _weatherApiKeyController.dispose();
     _weatherApiHostController.dispose();
     super.dispose();
@@ -123,18 +110,6 @@ class _SettingsPageState extends State<SettingsPage> {
           _remoteLlmBaseUrlController.text = remoteLlmSettings.baseUrl ?? '';
           _remoteLlmModelController.text = remoteLlmSettings.modelName ?? '';
           _remoteLlmApiKeyController.text = remoteLlmSettings.apiKey ?? '';
-        }
-        final agentLlmSettings = controller.agentLlmSettings;
-        final agentLlmSettingsSignature = _agentLlmSettingsSignature(
-          agentLlmSettings,
-        );
-        if (_syncedAgentLlmSettingsSignature != agentLlmSettingsSignature) {
-          _syncedAgentLlmSettingsSignature = agentLlmSettingsSignature;
-          _agentLlmProviderValue =
-              agentLlmSettings.provider ?? llmProviderPresets.first.id;
-          _agentLlmBaseUrlController.text = agentLlmSettings.baseUrl ?? '';
-          _agentLlmModelController.text = agentLlmSettings.modelName ?? '';
-          _agentLlmApiKeyController.text = agentLlmSettings.apiKey ?? '';
         }
         final weatherApiSignature =
             '${controller.weatherApiKey}|${controller.weatherApiHost}';
@@ -379,50 +354,6 @@ class _SettingsPageState extends State<SettingsPage> {
                 context,
                 () => controller.saveRemoteLlmAnalysisSettings(
                   _remoteLlmSettingsFromInputs(remoteLlmSettings),
-                ),
-              ),
-            ),
-          ),
-          _SettingsSectionSpec(
-            id: 'agent.llm',
-            category: _SettingsCategory.analysis,
-            icon: Icons.forum_rounded,
-            title: 'AI 助手模型',
-            subtitle: '配置 AI 助手对话使用的远程模型；留空则使用服务器端配置。',
-            keywords: const [
-              'AI',
-              'LLM',
-              '助手',
-              '对话',
-              '模型',
-              'DeepSeek',
-              'OpenAI',
-              'Kimi',
-              '智谱',
-              'Ollama',
-              'API Key',
-            ],
-            childBuilder: (_) => _AgentLlmPanel(
-              baseUrlController: _agentLlmBaseUrlController,
-              modelController: _agentLlmModelController,
-              apiKeyController: _agentLlmApiKeyController,
-              providerValue: _agentLlmProviderValue,
-              apiKeyVisible: _agentLlmApiKeyVisible,
-              settingsBusy: controller.agentLlmSettingsBusy,
-              onProviderChanged: (value) {
-                setState(() => _agentLlmProviderValue = value);
-                _applyProviderPresetDefaults(
-                  value,
-                  _agentLlmBaseUrlController,
-                  _agentLlmModelController,
-                );
-              },
-              onApiKeyVisibilityChanged: (visible) =>
-                  setState(() => _agentLlmApiKeyVisible = visible),
-              onSave: () => _runAsyncAction(
-                context,
-                () => controller.saveAgentLlmSettings(
-                  _agentLlmSettingsFromInputs(agentLlmSettings),
                 ),
               ),
             ),
@@ -1035,28 +966,6 @@ class _SettingsPageState extends State<SettingsPage> {
     if (modelController.text.trim().isEmpty) {
       modelController.text = preset.defaultModel;
     }
-  }
-
-  AgentLlmSettings _agentLlmSettingsFromInputs(AgentLlmSettings current) {
-    final provider = _agentLlmProviderValue;
-    final baseUrl = _agentLlmBaseUrlController.text.trim();
-    final modelName = _agentLlmModelController.text.trim();
-    final apiKey = _agentLlmApiKeyController.text.trim();
-    return current.copyWith(
-      provider: provider,
-      baseUrl: baseUrl.isEmpty ? null : baseUrl,
-      modelName: modelName.isEmpty ? null : modelName,
-      apiKey: apiKey.isEmpty ? null : apiKey,
-    );
-  }
-
-  String _agentLlmSettingsSignature(AgentLlmSettings settings) {
-    return [
-      settings.provider,
-      settings.baseUrl,
-      settings.modelName,
-      settings.apiKey,
-    ].join('|');
   }
 
   String _remoteLlmSettingsSignature(RemoteLlmAnalysisSettings settings) {
@@ -1958,118 +1867,6 @@ class _RemoteLlmAnalysisPanel extends StatelessWidget {
           value: settings.strictJsonSchema,
           enabled: !busy,
           onChanged: onStrictJsonSchemaChanged,
-        ),
-        const SizedBox(height: 14),
-        OutlinedButton.icon(
-          onPressed: busy ? null : onSave,
-          icon: const Icon(Icons.save_rounded),
-          label: const Text('保存设置'),
-        ),
-      ],
-    );
-  }
-}
-
-class _AgentLlmPanel extends StatelessWidget {
-  const _AgentLlmPanel({
-    required this.baseUrlController,
-    required this.modelController,
-    required this.apiKeyController,
-    required this.providerValue,
-    required this.apiKeyVisible,
-    required this.settingsBusy,
-    required this.onProviderChanged,
-    required this.onApiKeyVisibilityChanged,
-    required this.onSave,
-  });
-
-  final TextEditingController baseUrlController;
-  final TextEditingController modelController;
-  final TextEditingController apiKeyController;
-  final String? providerValue;
-  final bool apiKeyVisible;
-  final bool settingsBusy;
-  final ValueChanged<String> onProviderChanged;
-  final ValueChanged<bool> onApiKeyVisibilityChanged;
-  final VoidCallback onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    final busy = settingsBusy;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        DropdownButtonFormField<String>(
-          initialValue: providerValue ?? llmProviderPresets.first.id,
-          decoration: const InputDecoration(
-            labelText: '服务商',
-            border: OutlineInputBorder(),
-          ),
-          items: [
-            for (final preset in llmProviderPresets)
-              DropdownMenuItem(value: preset.id, child: Text(preset.label)),
-            const DropdownMenuItem(
-              value: llmCustomProviderId,
-              child: Text('自定义（填 Base URL）'),
-            ),
-          ],
-          onChanged: busy
-              ? null
-              : (value) {
-                  if (value != null) {
-                    onProviderChanged(value);
-                  }
-                },
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: baseUrlController,
-          enabled: !busy,
-          decoration: const InputDecoration(
-            labelText: 'Base URL',
-            hintText: 'OpenAI 兼容接口地址，例如 https://api.deepseek.com',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: modelController,
-          enabled: !busy,
-          decoration: const InputDecoration(
-            labelText: '模型名',
-            hintText: '例如 deepseek-v4-flash、deepseek-v4-pro、gpt-4o-mini',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: apiKeyController,
-          enabled: !busy,
-          obscureText: !apiKeyVisible,
-          decoration: InputDecoration(
-            labelText: 'API Key',
-            hintText: 'sk-...',
-            border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              icon: Icon(
-                apiKeyVisible
-                    ? Icons.visibility_off_rounded
-                    : Icons.visibility_rounded,
-              ),
-              onPressed: busy
-                  ? null
-                  : () => onApiKeyVisibilityChanged(!apiKeyVisible),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'API Key 仅保存在本机偏好中，对话时随请求发送到后端临时调用，后端不会保存。'
-          '全部留空时使用服务器端配置（环境变量）。',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Theme.of(context).colorScheme.outline,
-          ),
         ),
         const SizedBox(height: 14),
         OutlinedButton.icon(

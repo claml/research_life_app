@@ -258,9 +258,6 @@ class ResearchLifeController extends ChangeNotifier {
       const RemoteLlmAnalysisSettings();
   bool _remoteLlmAnalysisSettingsLoaded = false;
   bool _remoteLlmAnalysisSettingsBusy = false;
-  AgentLlmSettings _agentLlmSettings = const AgentLlmSettings();
-  bool _agentLlmSettingsLoaded = false;
-  bool _agentLlmSettingsBusy = false;
   bool _weatherLoaded = false;
   bool _weatherBusy = false;
   bool _weatherSearchBusy = false;
@@ -528,9 +525,6 @@ class ResearchLifeController extends ChangeNotifier {
       _remoteLlmAnalysisSettings;
   bool get remoteLlmAnalysisSettingsLoaded => _remoteLlmAnalysisSettingsLoaded;
   bool get remoteLlmAnalysisSettingsBusy => _remoteLlmAnalysisSettingsBusy;
-  AgentLlmSettings get agentLlmSettings => _agentLlmSettings;
-  bool get agentLlmSettingsLoaded => _agentLlmSettingsLoaded;
-  bool get agentLlmSettingsBusy => _agentLlmSettingsBusy;
   WeatherLocation? get weatherLocation => _weatherLocation;
   WeatherSnapshot? get weatherSnapshot => _weatherSnapshot;
   List<WeatherLocation> get weatherSearchResults =>
@@ -3083,34 +3077,6 @@ class ResearchLifeController extends ChangeNotifier {
     }
   }
 
-  Future<void> ensureAgentLlmSettingsLoaded() async {
-    if (_agentLlmSettingsLoaded || _agentLlmSettingsBusy) {
-      return;
-    }
-
-    _setAgentLlmSettingsBusy(true);
-    try {
-      _agentLlmSettings = await _loadStoredAgentLlmSettings();
-      _agentLlmSettingsLoaded = true;
-      notifyListeners();
-    } finally {
-      _setAgentLlmSettingsBusy(false);
-    }
-  }
-
-  Future<String> saveAgentLlmSettings(AgentLlmSettings settings) async {
-    final normalizedSettings = settings.copyWith();
-    _setAgentLlmSettingsBusy(true);
-    try {
-      _agentLlmSettings = normalizedSettings;
-      _agentLlmSettingsLoaded = true;
-      await _saveStoredAgentLlmSettings(normalizedSettings);
-      notifyListeners();
-      return 'AI 助手模型设置已保存。';
-    } finally {
-      _setAgentLlmSettingsBusy(false);
-    }
-  }
 
   Future<void> ensurePetCompanionLoaded({bool autoStart = false}) async {
     if (_petCompanionLoaded) {
@@ -3592,28 +3558,6 @@ class ResearchLifeController extends ChangeNotifier {
     );
   }
 
-  Future<AgentLlmSettings> _loadStoredAgentLlmSettings() async {
-    final rawSettings = await _preferencesRepository?.loadAgentLlmSettings();
-    if (rawSettings == null || rawSettings.trim().isEmpty) {
-      return const AgentLlmSettings();
-    }
-
-    try {
-      final decoded = jsonDecode(rawSettings);
-      if (decoded is Map) {
-        return AgentLlmSettings.fromJson(decoded.cast<String, Object?>());
-      }
-    } on FormatException {
-      return const AgentLlmSettings();
-    }
-    return const AgentLlmSettings();
-  }
-
-  Future<void> _saveStoredAgentLlmSettings(AgentLlmSettings settings) async {
-    await _preferencesRepository?.saveAgentLlmSettings(
-      jsonEncode(settings.toJson()),
-    );
-  }
 
   Future<WeatherLocation?> _loadStoredWeatherLocation() async {
     final rawLocation = await _preferencesRepository?.loadWeatherLocation();
@@ -4102,13 +4046,6 @@ class ResearchLifeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void _setAgentLlmSettingsBusy(bool value) {
-    if (_agentLlmSettingsBusy == value) {
-      return;
-    }
-    _agentLlmSettingsBusy = value;
-    notifyListeners();
-  }
 
   void _setPdfLibraryBusy(bool value) {
     if (_pdfLibraryBusy == value) {

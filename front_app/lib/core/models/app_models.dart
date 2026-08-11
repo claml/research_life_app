@@ -833,60 +833,6 @@ class RemoteLlmAnalysisSettings {
   }
 }
 
-/// AI 助手使用的远程 LLM 配置。留空时后端回退到服务器端配置（环境变量）。
-class AgentLlmSettings {
-  const AgentLlmSettings({
-    this.provider,
-    this.baseUrl,
-    this.modelName,
-    this.apiKey,
-  });
-
-  final String? provider;
-  final String? baseUrl;
-  final String? modelName;
-  final String? apiKey;
-
-  bool get hasApiKey {
-    final key = apiKey;
-    return key != null && key.trim().isNotEmpty;
-  }
-
-  factory AgentLlmSettings.fromJson(Map<String, Object?> json) {
-    return AgentLlmSettings(
-      provider: RemoteLlmAnalysisSettings._readNullableString(json['provider']),
-      baseUrl: RemoteLlmAnalysisSettings._readNullableString(json['baseUrl']),
-      modelName: RemoteLlmAnalysisSettings._readNullableString(
-        json['modelName'],
-      ),
-      apiKey: RemoteLlmAnalysisSettings._readNullableString(json['apiKey']),
-    );
-  }
-
-  AgentLlmSettings copyWith({
-    String? provider,
-    String? baseUrl,
-    String? modelName,
-    String? apiKey,
-  }) {
-    return AgentLlmSettings(
-      provider: provider ?? this.provider,
-      baseUrl: baseUrl ?? this.baseUrl,
-      modelName: modelName ?? this.modelName,
-      apiKey: apiKey ?? this.apiKey,
-    );
-  }
-
-  Map<String, Object?> toJson() {
-    return {
-      'provider': provider,
-      'baseUrl': baseUrl,
-      'modelName': modelName,
-      'apiKey': apiKey,
-    };
-  }
-}
-
 class PdfLibraryDocument {
   const PdfLibraryDocument({
     required this.id,

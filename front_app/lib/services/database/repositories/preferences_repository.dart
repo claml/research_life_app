@@ -131,14 +131,6 @@ class PreferencesRepository {
     return saveString(remoteLlmAnalysisSettingsKey, settingsJson);
   }
 
-  Future<String?> loadAgentLlmSettings() {
-    return loadString(agentLlmSettingsKey);
-  }
-
-  Future<void> saveAgentLlmSettings(String settingsJson) {
-    return saveString(agentLlmSettingsKey, settingsJson);
-  }
-
   Future<String?> loadGlassSettings() {
     return loadString(glassSettingsKey);
   }
