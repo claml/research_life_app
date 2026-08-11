@@ -6,11 +6,13 @@ import 'package:dio/dio.dart';
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:research_life/features/agent/state/agent_controller.dart';
+import 'package:research_life/services/agent/agent_models.dart';
 import 'package:research_life/services/agent/ai_credential_store.dart';
 import 'package:research_life/services/agent/ai_profile.dart';
 import 'package:research_life/services/agent/ai_profile_repository.dart';
 import 'package:research_life/services/agent/openai_compatible_chat_client.dart';
-import 'package:research_life/services/database/app_database.dart';
+import 'package:research_life/services/database/app_database.dart'
+    hide AgentChatMessage, AgentChatSession;
 import 'package:research_life/services/database/repositories/agent_chat_repository.dart';
 import 'package:research_life/services/database/repositories/preferences_repository.dart';
 import 'package:research_life/services/storage/local_data_operation_coordinator.dart';
@@ -23,7 +25,7 @@ void main() {
   });
 
   tearDown(() async {
-    fixture.controller.dispose();
+    fixture.disposeController();
     await fixture.closeDatabase();
   });
 
@@ -73,40 +75,46 @@ void main() {
     expect(await fixture.chats.listSessions(), isEmpty);
   });
 
-  test('first send commits a local session and user message before HTTP', () async {
-    await fixture.storeConfiguration();
-    await fixture.controller.bootstrap();
-    fixture.adapter.blockNext();
+  test(
+    'first send commits a local session and user message before HTTP',
+    () async {
+      await fixture.storeConfiguration();
+      await fixture.controller.bootstrap();
+      fixture.adapter.blockNext();
 
-    final send = fixture.controller.sendMessage('Committed first');
-    await fixture.adapter.requestStarted.future;
+      final send = fixture.controller.sendMessage('Committed first');
+      await fixture.adapter.requestStarted.future;
 
-    final sessions = await fixture.chats.listSessions();
-    expect(sessions, hasLength(1));
-    final stored = await fixture.chats.listMessages(sessions.single.id);
-    expect(stored.map((message) => message.content), ['Committed first']);
-    expect(stored.single.isUser, isTrue);
+      final sessions = await fixture.chats.listSessions();
+      expect(sessions, hasLength(1));
+      final stored = await fixture.chats.listMessages(sessions.single.id);
+      expect(stored.map((message) => message.content), ['Committed first']);
+      expect(stored.single.isUser, isTrue);
 
-    fixture.adapter.completeBlocked('Assistant answer');
-    await send;
-  });
+      fixture.adapter.completeBlocked('Assistant answer');
+      await send;
+    },
+  );
 
-  test('successful send persists assistant and truncates first title', () async {
-    await fixture.storeConfiguration();
-    await fixture.controller.bootstrap();
-    fixture.adapter.replyNext('Assistant answer', model: 'served-model');
-    const question = '12345678901234567890123456789012345';
+  test(
+    'successful send persists assistant and truncates first title',
+    () async {
+      await fixture.storeConfiguration();
+      await fixture.controller.bootstrap();
+      fixture.adapter.replyNext('Assistant answer', model: 'served-model');
+      const question = '12345678901234567890123456789012345';
 
-    await fixture.controller.sendMessage(question);
+      await fixture.controller.sendMessage(question);
 
-    final session = (await fixture.chats.listSessions()).single;
-    final stored = await fixture.chats.listMessages(session.id);
-    expect(stored.map((message) => message.role), ['user', 'assistant']);
-    expect(stored.last.content, 'Assistant answer');
-    expect(stored.last.model, 'served-model');
-    expect(session.title, '12345678901234567890123456789…');
-    expect(session.model, 'served-model');
-  });
+      final session = (await fixture.chats.listSessions()).single;
+      final stored = await fixture.chats.listMessages(session.id);
+      expect(stored.map((message) => message.role), ['user', 'assistant']);
+      expect(stored.last.content, 'Assistant answer');
+      expect(stored.last.model, 'served-model');
+      expect(session.title, '12345678901234567890123456789…');
+      expect(session.model, 'served-model');
+    },
+  );
 
   test('failed request keeps one user message and retry reuses it', () async {
     await fixture.storeConfiguration();
@@ -158,32 +166,32 @@ void main() {
     await first;
   });
 
-  test('local save failure stops before HTTP and does not leak input', () async {
-    const content = 'private-content-marker';
-    const key = 'private-key-marker';
-    await fixture.storeConfiguration(credential: key);
-    await fixture.controller.bootstrap();
-    fixture.adapter.replyNext('unused');
-    await fixture.closeDatabase();
+  test(
+    'local save failure stops before HTTP and does not leak input',
+    () async {
+      const content = 'private-content-marker';
+      const key = 'private-key-marker';
+      await fixture.storeConfiguration(credential: key);
+      await fixture.controller.bootstrap();
+      fixture.adapter.replyNext('unused');
+      await fixture.closeDatabase();
 
-    await fixture.controller.sendMessage(content);
+      await fixture.controller.sendMessage(content);
 
-    expect(fixture.adapter.calls, 0);
-    expect(fixture.controller.error, isNotNull);
-    expect(fixture.controller.error, isNot(contains(content)));
-    expect(fixture.controller.error, isNot(contains(key)));
-  });
+      expect(fixture.adapter.calls, 0);
+      expect(fixture.controller.error, isNotNull);
+      expect(fixture.controller.error, isNot(contains(content)));
+      expect(fixture.controller.error, isNot(contains(key)));
+    },
+  );
 
   test('assistant save failure exposes the volatile answer', () async {
     await fixture.storeConfiguration();
     await fixture.controller.bootstrap();
-    fixture.adapter.blockNext();
+    fixture.chats.failNextAssistantAppend = true;
+    fixture.adapter.replyNext('Visible but volatile');
 
-    final send = fixture.controller.sendMessage('Persist my answer');
-    await fixture.adapter.requestStarted.future;
-    await fixture.closeDatabase();
-    fixture.adapter.completeBlocked('Visible but volatile');
-    await send;
+    await fixture.controller.sendMessage('Persist my answer');
 
     expect(fixture.controller.messages.last.isAssistant, isTrue);
     expect(fixture.controller.messages.last.content, 'Visible but volatile');
@@ -223,7 +231,9 @@ void main() {
     expect(fixture.controller.messages.single.content, 'Old question');
 
     await fixture.controller.deleteSession(older.id);
-    expect(fixture.controller.sessions.map((session) => session.id), [newer.id]);
+    expect(fixture.controller.sessions.map((session) => session.id), [
+      newer.id,
+    ]);
     expect(fixture.controller.currentSessionId, newer.id);
     expect(fixture.controller.messages.single.content, 'New question');
     expect(fixture.adapter.calls, 0);
@@ -247,6 +257,255 @@ void main() {
     );
   });
 
+  test('cancel during credential read is sticky and starts no HTTP', () async {
+    await fixture.storeConfiguration();
+    await fixture.controller.bootstrap();
+    final credentialRead = fixture.credentials.blockNextRead();
+    fixture.adapter.replyNext('must not be used');
+
+    final send = fixture.controller.sendMessage('Cancelled before local work');
+    await credentialRead.started.future;
+    fixture.controller.cancelActiveRequest();
+    credentialRead.release.complete();
+    await send;
+
+    expect(fixture.adapter.calls, 0);
+    expect(await fixture.chats.listSessions(), isEmpty);
+    expect(fixture.controller.error, isNull);
+  });
+
+  test(
+    'dispose during context load prevents HTTP and retains retry id',
+    () async {
+      await fixture.storeConfiguration();
+      await fixture.controller.bootstrap();
+      final contextLoad = fixture.chats.blockNextMessageLoad();
+      fixture.adapter.replyNext('must not be used');
+
+      final send = fixture.controller.sendMessage('Committed before dispose');
+      await contextLoad.started.future;
+      fixture.disposeController();
+      contextLoad.release.complete();
+      await send;
+
+      expect(fixture.adapter.calls, 0);
+      final session = (await fixture.chats.listSessions()).single;
+      expect(
+        (await fixture.chats.listMessages(session.id)).single.content,
+        'Committed before dispose',
+      );
+      expect(fixture.controller.canRetry, isTrue);
+    },
+  );
+
+  test(
+    'context read failure leaves persisted user retryable without duplicate',
+    () async {
+      await fixture.storeConfiguration();
+      await fixture.controller.bootstrap();
+      fixture.chats.failNextMessageLoad = true;
+      fixture.adapter.replyNext('Recovered after local read');
+
+      await fixture.controller.sendMessage('One durable user');
+
+      final session = (await fixture.chats.listSessions()).single;
+      expect((await fixture.chats.listMessages(session.id)), hasLength(1));
+      expect(fixture.controller.canRetry, isTrue);
+      expect(fixture.adapter.calls, 0);
+
+      await fixture.controller.retryFailedMessage();
+
+      final stored = await fixture.chats.listMessages(session.id);
+      expect(stored.map((message) => message.role), ['user', 'assistant']);
+      expect(stored.where((message) => message.isUser), hasLength(1));
+      expect(fixture.adapter.calls, 1);
+    },
+  );
+
+  test(
+    'profile save failure preserves durable and in-memory configuration',
+    () async {
+      await fixture.storeConfiguration(credential: 'old-key');
+      await fixture.controller.bootstrap();
+      fixture.profiles.failNextSave = true;
+
+      await fixture.controller.saveConfiguration(
+        profile: replacementProfile,
+        credential: 'new-key',
+      );
+
+      expect(await fixture.profiles.loadActive(), remoteProfile);
+      expect(await fixture.credentials.read(remoteProfile.id), 'old-key');
+      expect(fixture.controller.profile, remoteProfile);
+      expect(fixture.controller.hasCredential, isTrue);
+      expect(fixture.controller.error, isNotNull);
+    },
+  );
+
+  test(
+    'credential write failure rolls profile back without losing old key',
+    () async {
+      await fixture.storeConfiguration(credential: 'old-key');
+      await fixture.controller.bootstrap();
+      fixture.credentials.failNextWrite = true;
+
+      await fixture.controller.saveConfiguration(
+        profile: replacementProfile,
+        credential: 'new-key',
+      );
+
+      expect(await fixture.profiles.loadActive(), remoteProfile);
+      expect(await fixture.credentials.read(remoteProfile.id), 'old-key');
+      expect(fixture.controller.profile, remoteProfile);
+      expect(fixture.controller.hasCredential, isTrue);
+      expect(fixture.controller.error, isNotNull);
+    },
+  );
+
+  test('post-write status failure rolls profile and credential back', () async {
+    await fixture.storeConfiguration(credential: 'old-key');
+    await fixture.controller.bootstrap();
+    fixture.credentials.failNextHas = true;
+
+    await fixture.controller.saveConfiguration(
+      profile: replacementProfile,
+      credential: 'new-key',
+    );
+
+    expect(await fixture.profiles.loadActive(), remoteProfile);
+    expect(await fixture.credentials.read(remoteProfile.id), 'old-key');
+    expect(fixture.controller.profile, remoteProfile);
+    expect(fixture.controller.hasCredential, isTrue);
+    expect(fixture.controller.error, isNotNull);
+  });
+
+  test(
+    'latest openSession wins when message loads complete out of order',
+    () async {
+      await fixture.storeConfiguration();
+      final older = await fixture.chats.createSession(
+        profileId: remoteProfile.id,
+        model: remoteProfile.model,
+        title: 'Older',
+      );
+      await fixture.chats.appendMessage(
+        sessionId: older.id,
+        role: 'user',
+        content: 'Older history',
+      );
+      final newer = await fixture.chats.createSession(
+        profileId: remoteProfile.id,
+        model: remoteProfile.model,
+        title: 'Newer',
+      );
+      await fixture.chats.appendMessage(
+        sessionId: newer.id,
+        role: 'user',
+        content: 'Newer history',
+      );
+      await fixture.controller.bootstrap();
+      final oldLoad = fixture.chats.blockNextMessageLoad(sessionId: older.id);
+      final newLoad = fixture.chats.blockNextMessageLoad(sessionId: newer.id);
+
+      final openOlder = fixture.controller.openSession(older.id);
+      await oldLoad.started.future;
+      final openNewer = fixture.controller.openSession(newer.id);
+      await newLoad.started.future;
+      newLoad.release.complete();
+      await openNewer;
+      oldLoad.release.complete();
+      await openOlder;
+
+      expect(fixture.controller.currentSessionId, newer.id);
+      expect(fixture.controller.messages.map((message) => message.content), [
+        'Newer history',
+      ]);
+      expect(fixture.controller.loadingMessages, isFalse);
+      expect(fixture.controller.error, isNull);
+    },
+  );
+
+  test(
+    'next send persists volatile assistant before building context',
+    () async {
+      await fixture.storeConfiguration();
+      await fixture.controller.bootstrap();
+      fixture.chats.failNextAssistantAppend = true;
+      fixture.adapter.replyNext('First volatile answer');
+      await fixture.controller.sendMessage('First user');
+      fixture.adapter.replyNext('Second answer');
+
+      await fixture.controller.sendMessage('Second user');
+
+      final session = (await fixture.chats.listSessions()).single;
+      final stored = await fixture.chats.listMessages(session.id);
+      expect(stored.map((message) => message.content), [
+        'First user',
+        'First volatile answer',
+        'Second user',
+        'Second answer',
+      ]);
+      expect(fixture.controller.volatileAssistantMessage, isNull);
+      expect(
+        fixture.controller.messages.where((message) => message.id < 0),
+        isEmpty,
+      );
+      expect(fixture.adapter.jsonBodies[1]['messages'], [
+        {'role': 'user', 'content': 'First user'},
+        {'role': 'assistant', 'content': 'First volatile answer'},
+        {'role': 'user', 'content': 'Second user'},
+      ]);
+    },
+  );
+
+  test('failed volatile persistence blocks another user and HTTP', () async {
+    await fixture.storeConfiguration();
+    await fixture.controller.bootstrap();
+    fixture.chats.failNextAssistantAppend = true;
+    fixture.adapter.replyNext('Still volatile');
+    await fixture.controller.sendMessage('First user');
+    fixture.chats.failNextAssistantAppend = true;
+    fixture.adapter.replyNext('must not be used');
+
+    await fixture.controller.sendMessage('Must not append');
+
+    final session = (await fixture.chats.listSessions()).single;
+    expect(
+      (await fixture.chats.listMessages(session.id)).map((m) => m.content),
+      ['First user'],
+    );
+    expect(fixture.adapter.calls, 1);
+    expect(
+      fixture.controller.volatileAssistantMessage?.content,
+      'Still volatile',
+    );
+  });
+
+  test('failed volatile recovery blocks opening another session', () async {
+    await fixture.storeConfiguration();
+    final other = await fixture.chats.createSession(
+      profileId: remoteProfile.id,
+      model: remoteProfile.model,
+      title: 'Other',
+    );
+    await fixture.controller.bootstrap();
+    await fixture.controller.startNewSession();
+    fixture.chats.failNextAssistantAppend = true;
+    fixture.adapter.replyNext('Stay visible');
+    await fixture.controller.sendMessage('Current user');
+    final currentId = fixture.controller.currentSessionId;
+    fixture.chats.failNextAssistantAppend = true;
+
+    await fixture.controller.openSession(other.id);
+
+    expect(fixture.controller.currentSessionId, currentId);
+    expect(
+      fixture.controller.volatileAssistantMessage?.content,
+      'Stay visible',
+    );
+    expect(fixture.controller.messages.last.content, 'Stay visible');
+  });
+
   test('blank credential retains the existing credential', () async {
     await fixture.storeConfiguration(credential: 'existing-key');
 
@@ -255,7 +514,10 @@ void main() {
       credential: '   ',
     );
 
-    expect(await fixture.credentials.read(replacementProfile.id), 'existing-key');
+    expect(
+      await fixture.credentials.read(replacementProfile.id),
+      'existing-key',
+    );
     expect(await fixture.profiles.loadActive(), replacementProfile);
     expect(fixture.controller.hasCredential, isTrue);
   });
@@ -268,7 +530,10 @@ void main() {
       credential: ' replacement-key ',
     );
 
-    expect(await fixture.credentials.read(replacementProfile.id), 'replacement-key');
+    expect(
+      await fixture.credentials.read(replacementProfile.id),
+      'replacement-key',
+    );
     expect(fixture.controller.error, isNull);
   });
 
@@ -317,10 +582,9 @@ final class _Fixture {
       database,
       operationCoordinator: coordinator,
     );
-    profiles = AiProfileRepository(preferences);
-    chats = AgentChatRepository(
-      database,
-      operationCoordinator: coordinator,
+    profiles = _ControlledProfileStore(AiProfileRepository(preferences));
+    chats = _ControlledChatStore(
+      AgentChatRepository(database, operationCoordinator: coordinator),
     );
     client = OpenAiCompatibleChatClient(httpClientAdapter: adapter);
     controller = AgentController(
@@ -335,11 +599,12 @@ final class _Fixture {
   final LocalDataOperationCoordinator coordinator;
   final _MemoryCredentialStore credentials;
   final _ScriptedAdapter adapter;
-  late final AiProfileRepository profiles;
-  late final AgentChatRepository chats;
+  late final _ControlledProfileStore profiles;
+  late final _ControlledChatStore chats;
   late final OpenAiCompatibleChatClient client;
   late final AgentController controller;
   bool _databaseClosed = false;
+  bool _controllerDisposed = false;
 
   Future<void> storeConfiguration({String credential = 'test-key'}) async {
     await profiles.saveActive(remoteProfile);
@@ -351,10 +616,25 @@ final class _Fixture {
     _databaseClosed = true;
     await database.close();
   }
+
+  void disposeController() {
+    if (_controllerDisposed) return;
+    _controllerDisposed = true;
+    controller.dispose();
+  }
 }
 
 final class _MemoryCredentialStore implements AiCredentialStore {
   final Map<String, String> _values = <String, String>{};
+  _AsyncGate? _blockedRead;
+  bool failNextWrite = false;
+  bool failNextHas = false;
+
+  _AsyncGate blockNextRead() {
+    final gate = _AsyncGate();
+    _blockedRead = gate;
+    return gate;
+  }
 
   @override
   Future<void> delete(String profileId) async {
@@ -362,24 +642,167 @@ final class _MemoryCredentialStore implements AiCredentialStore {
   }
 
   @override
-  Future<bool> has(String profileId) async => _values.containsKey(profileId);
+  Future<bool> has(String profileId) async {
+    if (failNextHas) {
+      failNextHas = false;
+      throw const AiCredentialException();
+    }
+    return _values.containsKey(profileId);
+  }
 
   @override
-  Future<String?> read(String profileId) async => _values[profileId];
+  Future<String?> read(String profileId) async {
+    final gate = _blockedRead;
+    if (gate != null) {
+      _blockedRead = null;
+      gate.started.complete();
+      await gate.release.future;
+    }
+    return _values[profileId];
+  }
 
   @override
   Future<void> write(String profileId, String secret) async {
+    if (failNextWrite) {
+      failNextWrite = false;
+      throw const AiCredentialException();
+    }
     _values[profileId] = secret;
   }
 }
 
-typedef _AdapterAction = Future<ResponseBody> Function(
-  RequestOptions options,
-  Future<void>? cancelFuture,
-);
+final class _ControlledProfileStore implements AiProfileStore {
+  _ControlledProfileStore(this._delegate);
+
+  final AiProfileRepository _delegate;
+  bool failNextSave = false;
+
+  @override
+  Future<void> clearActive() => _delegate.clearActive();
+
+  @override
+  Future<AiProviderProfile?> loadActive() => _delegate.loadActive();
+
+  @override
+  Future<void> saveActive(AiProviderProfile profile) {
+    if (failNextSave) {
+      failNextSave = false;
+      return Future<void>.error(StateError('controlled profile save failure'));
+    }
+    return _delegate.saveActive(profile);
+  }
+}
+
+final class _ControlledChatStore implements AgentChatStore {
+  _ControlledChatStore(this._delegate);
+
+  final AgentChatRepository _delegate;
+  final List<_MessageLoadGate> _messageLoadGates = <_MessageLoadGate>[];
+  bool failNextMessageLoad = false;
+  bool failNextAssistantAppend = false;
+
+  _AsyncGate blockNextMessageLoad({int? sessionId}) {
+    final gate = _AsyncGate();
+    _messageLoadGates.add(_MessageLoadGate(sessionId: sessionId, gate: gate));
+    return gate;
+  }
+
+  @override
+  Future<AgentChatMessage> appendMessage({
+    required int sessionId,
+    required String role,
+    required String content,
+    String? reasoningContent,
+    String? model,
+  }) {
+    if (role == 'assistant' && failNextAssistantAppend) {
+      failNextAssistantAppend = false;
+      return Future<AgentChatMessage>.error(
+        StateError('controlled assistant append failure'),
+      );
+    }
+    return _delegate.appendMessage(
+      sessionId: sessionId,
+      role: role,
+      content: content,
+      reasoningContent: reasoningContent,
+      model: model,
+    );
+  }
+
+  @override
+  Future<AgentChatSession> createSession({
+    required String profileId,
+    required String model,
+    required String title,
+  }) {
+    return _delegate.createSession(
+      profileId: profileId,
+      model: model,
+      title: title,
+    );
+  }
+
+  @override
+  Future<void> deleteSession(int sessionId) =>
+      _delegate.deleteSession(sessionId);
+
+  @override
+  Future<List<AgentChatMessage>> listMessages(int sessionId) async {
+    if (failNextMessageLoad) {
+      failNextMessageLoad = false;
+      throw StateError('controlled message load failure');
+    }
+    final gateIndex = _messageLoadGates.indexWhere(
+      (candidate) =>
+          candidate.sessionId == null || candidate.sessionId == sessionId,
+    );
+    if (gateIndex >= 0) {
+      final blocked = _messageLoadGates.removeAt(gateIndex).gate;
+      blocked.started.complete();
+      await blocked.release.future;
+    }
+    return _delegate.listMessages(sessionId);
+  }
+
+  @override
+  Future<List<AgentChatSession>> listSessions() => _delegate.listSessions();
+
+  @override
+  Future<AgentChatSession> updateSessionAfterReply({
+    required int sessionId,
+    String? title,
+    String? model,
+  }) {
+    return _delegate.updateSessionAfterReply(
+      sessionId: sessionId,
+      title: title,
+      model: model,
+    );
+  }
+}
+
+final class _AsyncGate {
+  final Completer<void> started = Completer<void>();
+  final Completer<void> release = Completer<void>();
+}
+
+final class _MessageLoadGate {
+  const _MessageLoadGate({required this.sessionId, required this.gate});
+
+  final int? sessionId;
+  final _AsyncGate gate;
+}
+
+typedef _AdapterAction =
+    Future<ResponseBody> Function(
+      RequestOptions options,
+      Future<void>? cancelFuture,
+    );
 
 final class _ScriptedAdapter implements HttpClientAdapter {
   final List<_AdapterAction> _actions = <_AdapterAction>[];
+  final List<Map<String, Object?>> jsonBodies = <Map<String, Object?>>[];
   int calls = 0;
   Completer<void> requestStarted = Completer<void>();
   Completer<ResponseBody>? _blocked;
@@ -429,7 +852,15 @@ final class _ScriptedAdapter implements HttpClientAdapter {
   ) async {
     calls += 1;
     if (requestStream != null) {
-      await requestStream.drain<void>();
+      final bytes = <int>[];
+      await for (final chunk in requestStream) {
+        bytes.addAll(chunk);
+      }
+      if (bytes.isNotEmpty) {
+        jsonBodies.add(
+          Map<String, Object?>.from(jsonDecode(utf8.decode(bytes)) as Map),
+        );
+      }
     }
     if (!requestStarted.isCompleted) requestStarted.complete();
     if (_actions.isEmpty) {

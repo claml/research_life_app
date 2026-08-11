@@ -4,7 +4,35 @@ import '../../agent/agent_models.dart' as domain;
 import '../../storage/local_data_operation_coordinator.dart';
 import '../app_database.dart' as db;
 
-class AgentChatRepository {
+abstract interface class AgentChatStore {
+  Future<domain.AgentChatSession> createSession({
+    required String profileId,
+    required String model,
+    required String title,
+  });
+
+  Future<List<domain.AgentChatSession>> listSessions();
+
+  Future<List<domain.AgentChatMessage>> listMessages(int sessionId);
+
+  Future<domain.AgentChatMessage> appendMessage({
+    required int sessionId,
+    required String role,
+    required String content,
+    String? reasoningContent,
+    String? model,
+  });
+
+  Future<domain.AgentChatSession> updateSessionAfterReply({
+    required int sessionId,
+    String? title,
+    String? model,
+  });
+
+  Future<void> deleteSession(int sessionId);
+}
+
+class AgentChatRepository implements AgentChatStore {
   const AgentChatRepository(
     this._database, {
     required LocalDataOperationCoordinator operationCoordinator,
@@ -13,6 +41,7 @@ class AgentChatRepository {
   final db.AppDatabase _database;
   final LocalDataOperationCoordinator _operationCoordinator;
 
+  @override
   Future<domain.AgentChatSession> createSession({
     required String profileId,
     required String model,
@@ -35,6 +64,7 @@ class AgentChatRepository {
     });
   }
 
+  @override
   Future<List<domain.AgentChatSession>> listSessions() async {
     final rows =
         await (_database.select(_database.agentChatSessions)..orderBy([
@@ -49,6 +79,7 @@ class AgentChatRepository {
     return rows.map(_sessionFromRow).toList(growable: false);
   }
 
+  @override
   Future<List<domain.AgentChatMessage>> listMessages(int sessionId) async {
     final rows =
         await (_database.select(_database.agentChatMessages)
@@ -61,6 +92,7 @@ class AgentChatRepository {
     return rows.map(_messageFromRow).toList(growable: false);
   }
 
+  @override
   Future<domain.AgentChatMessage> appendMessage({
     required int sessionId,
     required String role,
@@ -85,6 +117,7 @@ class AgentChatRepository {
     });
   }
 
+  @override
   Future<domain.AgentChatSession> updateSessionAfterReply({
     required int sessionId,
     String? title,
@@ -104,6 +137,7 @@ class AgentChatRepository {
     });
   }
 
+  @override
   Future<void> deleteSession(int sessionId) {
     return _operationCoordinator.runExclusive(() async {
       await _database.transaction(() async {
