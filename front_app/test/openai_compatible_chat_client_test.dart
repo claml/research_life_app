@@ -1,8 +1,10 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:dio/io.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:research_life/services/agent/agent_models.dart';
 import 'package:research_life/services/agent/ai_profile.dart';
@@ -117,6 +119,95 @@ void main() {
       expect((await server.nextRequest).authorization, isNull);
     });
 
+    for (final provider in ['deepseek', 'openai']) {
+      test('$provider blocks remote plaintext HTTP before sending', () async {
+        final server = await _RecordingServer.start();
+        addTearDown(server.close);
+
+        await _expectKind(
+          () =>
+              OpenAiCompatibleChatClient(
+                httpClientAdapter: _redirectingAdapter(server.port),
+              ).complete(
+                profile: _profile(
+                  'http://api.example.test:${server.port}/v1',
+                  provider: provider,
+                ),
+                messages: const [
+                  AiChatTurn(role: 'user', content: 'private-user'),
+                ],
+                credential: 'private-key',
+              ),
+          AiChatClientExceptionKind.invalidResponse,
+        );
+        await Future<void>.delayed(const Duration(milliseconds: 30));
+
+        expect(server.requestCount, 0);
+      });
+    }
+
+    test('localhost.evil is not treated as a loopback host', () async {
+      final server = await _RecordingServer.start();
+      addTearDown(server.close);
+
+      await _expectKind(
+        () =>
+            OpenAiCompatibleChatClient(
+              httpClientAdapter: _redirectingAdapter(server.port),
+            ).complete(
+              profile: _profile(
+                'http://localhost.evil:${server.port}/v1',
+                provider: 'deepseek',
+              ),
+              messages: const [
+                AiChatTurn(role: 'user', content: 'private-user'),
+              ],
+              credential: 'private-key',
+            ),
+        AiChatClientExceptionKind.invalidResponse,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+
+      expect(server.requestCount, 0);
+    });
+
+    for (final provider in ['custom', 'ollama']) {
+      test('$provider allows an explicit remote plaintext endpoint', () async {
+        final server = await _RecordingServer.start();
+        addTearDown(server.close);
+
+        await OpenAiCompatibleChatClient(
+          httpClientAdapter: _redirectingAdapter(server.port),
+        ).complete(
+          profile: _profile(
+            'http://api.example.test:${server.port}/v1',
+            provider: provider,
+            requiresCredential: provider == 'custom',
+          ),
+          messages: const [AiChatTurn(role: 'user', content: 'hello')],
+          credential: provider == 'custom' ? 'test-key' : null,
+        );
+
+        expect(server.requestCount, 1);
+      });
+    }
+
+    test(
+      'a remote preset allows plaintext for an IPv4 loopback host',
+      () async {
+        final server = await _RecordingServer.start();
+        addTearDown(server.close);
+
+        await OpenAiCompatibleChatClient().complete(
+          profile: _profile(server.baseUrl, provider: 'deepseek'),
+          messages: const [AiChatTurn(role: 'user', content: 'hello')],
+          credential: 'test-key',
+        );
+
+        expect(server.requestCount, 1);
+      },
+    );
+
     test('parses content reasoning model and finish reason', () async {
       final server = await _RecordingServer.start(
         responseBody: {
@@ -221,23 +312,39 @@ void main() {
       });
     }
 
-    test('an unreachable endpoint maps to unreachable', () async {
-      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
-      final port = server.port;
-      await server.close(force: true);
-
+    test('a connection error maps to unreachable', () async {
       await _expectKind(
         () =>
             OpenAiCompatibleChatClient(
-              connectTimeout: const Duration(milliseconds: 300),
+              httpClientAdapter: _DioFailureAdapter(
+                DioExceptionType.connectionError,
+              ),
             ).complete(
-              profile: _profile('http://127.0.0.1:$port'),
+              profile: _profile('https://api.example.test/v1'),
               messages: const [
                 AiChatTurn(role: 'user', content: 'private-user'),
               ],
               credential: 'private-key',
             ),
         AiChatClientExceptionKind.unreachable,
+      );
+    });
+
+    test('a connection timeout maps to timeout', () async {
+      await _expectKind(
+        () =>
+            OpenAiCompatibleChatClient(
+              httpClientAdapter: _DioFailureAdapter(
+                DioExceptionType.connectionTimeout,
+              ),
+            ).complete(
+              profile: _profile('https://api.example.test/v1'),
+              messages: const [
+                AiChatTurn(role: 'user', content: 'private-user'),
+              ],
+              credential: 'private-key',
+            ),
+        AiChatClientExceptionKind.timeout,
       );
     });
 
@@ -414,6 +521,47 @@ final class _RecordedRequest {
   final Map<String, Object?> jsonBody;
 }
 
+IOHttpClientAdapter _redirectingAdapter(int port) {
+  return IOHttpClientAdapter(
+    createHttpClient: () {
+      final client = HttpClient()..findProxy = (_) => 'DIRECT';
+      client.connectionFactory = (uri, proxyHost, proxyPort) {
+        return Socket.startConnect(InternetAddress.loopbackIPv4, port);
+      };
+      return client;
+    },
+  );
+}
+
+final class _DioFailureAdapter implements HttpClientAdapter {
+  _DioFailureAdapter(this.type);
+
+  final DioExceptionType type;
+
+  @override
+  Future<ResponseBody> fetch(
+    RequestOptions options,
+    Stream<Uint8List>? requestStream,
+    Future<void>? cancelFuture,
+  ) {
+    final error = switch (type) {
+      DioExceptionType.connectionTimeout => DioException.connectionTimeout(
+        timeout: const Duration(milliseconds: 10),
+        requestOptions: options,
+      ),
+      DioExceptionType.connectionError => DioException.connectionError(
+        reason: 'controlled test failure',
+        requestOptions: options,
+      ),
+      _ => throw StateError('Unsupported Dio failure type: $type'),
+    };
+    return Future<ResponseBody>.error(error);
+  }
+
+  @override
+  void close({bool force = false}) {}
+}
+
 final class _RecordingServer {
   _RecordingServer._({
     required HttpServer server,
@@ -437,6 +585,7 @@ final class _RecordingServer {
   int requestCount = 0;
 
   String get baseUrl => 'http://127.0.0.1:${_server.port}';
+  int get port => _server.port;
   Future<_RecordedRequest> get nextRequest => _nextRequest.future;
 
   static Future<_RecordingServer> start({

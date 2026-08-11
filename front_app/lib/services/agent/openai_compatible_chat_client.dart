@@ -52,13 +52,18 @@ class OpenAiCompatibleChatClient {
     Duration connectTimeout = const Duration(seconds: 15),
     Duration sendTimeout = const Duration(seconds: 30),
     Duration receiveTimeout = const Duration(seconds: 60),
+    HttpClientAdapter? httpClientAdapter,
   }) : _dio = Dio(
          BaseOptions(
            connectTimeout: connectTimeout,
            sendTimeout: sendTimeout,
            receiveTimeout: receiveTimeout,
          ),
-       );
+       ) {
+    if (httpClientAdapter != null) {
+      _dio.httpClientAdapter = httpClientAdapter;
+    }
+  }
 
   final Dio _dio;
 
@@ -68,7 +73,7 @@ class OpenAiCompatibleChatClient {
     required String? credential,
     CancelToken? cancelToken,
   }) async {
-    final endpoint = _chatCompletionsUri(profile.baseUrl);
+    final endpoint = _chatCompletionsUri(profile);
     final trimmedCredential = credential?.trim();
 
     try {
@@ -106,12 +111,18 @@ class OpenAiCompatibleChatClient {
   }
 }
 
-Uri _chatCompletionsUri(String baseUrl) {
-  final uri = Uri.tryParse(baseUrl.trim());
+Uri _chatCompletionsUri(AiProviderProfile profile) {
+  final uri = Uri.tryParse(profile.baseUrl.trim());
   if (uri == null ||
       !uri.isAbsolute ||
       (uri.scheme != 'http' && uri.scheme != 'https') ||
       uri.host.isEmpty) {
+    throw const AiChatClientException.invalidResponse();
+  }
+  if (uri.scheme == 'http' &&
+      profile.provider != 'ollama' &&
+      profile.provider != 'custom' &&
+      !_isLoopbackHost(uri.host)) {
     throw const AiChatClientException.invalidResponse();
   }
 
@@ -125,6 +136,11 @@ Uri _chatCompletionsUri(String baseUrl) {
         : '$path/chat/completions';
   }
   return uri.replace(path: path, fragment: '');
+}
+
+bool _isLoopbackHost(String host) {
+  if (host.toLowerCase() == 'localhost') return true;
+  return InternetAddress.tryParse(host)?.isLoopback ?? false;
 }
 
 AiChatCompletion _parseCompletion(Object? responseData) {
@@ -166,10 +182,10 @@ AiChatClientException _mapDioException(DioException error) {
   switch (error.type) {
     case DioExceptionType.cancel:
       return const AiChatClientException.cancelled();
+    case DioExceptionType.connectionTimeout:
     case DioExceptionType.sendTimeout:
     case DioExceptionType.receiveTimeout:
       return const AiChatClientException.timeout();
-    case DioExceptionType.connectionTimeout:
     case DioExceptionType.connectionError:
     case DioExceptionType.badCertificate:
       return const AiChatClientException.unreachable();
