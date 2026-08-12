@@ -697,6 +697,16 @@ void main() {
       );
       expect(fixture.controller.hasCredential, isTrue);
       expect(fixture.controller.needsConfiguration, isFalse);
+      fixture.adapter.replyNext('openai answer');
+      await fixture.controller.sendMessage('use restored OpenAI key');
+      expect(
+        fixture.adapter.authorizationHeaders.last,
+        'Bearer openai-only-key',
+      );
+      expect(
+        fixture.adapter.authorizationHeaders.last,
+        isNot(contains('deepseek-only-key')),
+      );
     },
   );
 
@@ -749,6 +759,76 @@ void main() {
     );
     expect(fixture.controller.needsConfiguration, isTrue);
     expect((await fixture.chats.listSessions()).single.id, session.id);
+  });
+
+  test(
+    'concurrent configuration saves finish with latest invocation',
+    () async {
+      final firstSave = fixture.profiles.blockNextSave();
+      final saveA = fixture.controller.saveConfiguration(
+        profile: remoteProfile,
+        credential: 'openai-key',
+      );
+      await firstSave.started.future;
+      const deepSeek = AiProviderProfile(
+        id: 'primary',
+        provider: 'deepseek',
+        displayName: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com',
+        model: 'deepseek-chat',
+        requiresCredential: true,
+      );
+      final saveB = fixture.controller.saveConfiguration(
+        profile: deepSeek,
+        credential: 'deepseek-key',
+      );
+      await Future<void>.delayed(Duration.zero);
+      firstSave.release.complete();
+      await Future.wait([saveA, saveB]);
+
+      expect(await fixture.profiles.loadActive(), deepSeek);
+      expect(fixture.controller.profile, deepSeek);
+      expect(fixture.controller.hasCredential, isTrue);
+    },
+  );
+
+  test('late bootstrap cannot overwrite a newer save', () async {
+    await fixture.storeConfiguration();
+    final oldLoad = fixture.profiles.blockNextLoad();
+    final bootstrap = fixture.controller.bootstrap();
+    await oldLoad.started.future;
+    final save = fixture.controller.saveConfiguration(
+      profile: replacementProfile,
+      credential: 'replacement-key',
+    );
+    oldLoad.release.complete();
+    await Future.wait([bootstrap, save]);
+
+    expect(await fixture.profiles.loadActive(), replacementProfile);
+    expect(fixture.controller.profile, replacementProfile);
+    expect(fixture.controller.hasCredential, isTrue);
+  });
+
+  test('delete then save is serialized without memory durable split', () async {
+    await fixture.storeConfiguration();
+    await fixture.controller.bootstrap();
+    final blockedDelete = fixture.credentials.blockNextDelete();
+    final deletion = fixture.controller.deleteCredential();
+    await blockedDelete.started.future;
+    final save = fixture.controller.saveConfiguration(
+      profile: replacementProfile,
+      credential: 'new-key',
+    );
+    blockedDelete.release.complete();
+    await Future.wait([deletion, save]);
+
+    expect(await fixture.profiles.loadActive(), replacementProfile);
+    expect(fixture.controller.profile, replacementProfile);
+    expect(fixture.controller.hasCredential, isTrue);
+    expect(
+      await fixture.credentials.read(aiCredentialId(replacementProfile)),
+      'new-key',
+    );
   });
 }
 
@@ -825,6 +905,7 @@ final class _Fixture {
 final class _MemoryCredentialStore implements AiCredentialStore {
   final Map<String, String> _values = <String, String>{};
   _AsyncGate? _blockedRead;
+  _AsyncGate? _blockedDelete;
   bool failNextWrite = false;
   bool failNextHas = false;
 
@@ -834,8 +915,16 @@ final class _MemoryCredentialStore implements AiCredentialStore {
     return gate;
   }
 
+  _AsyncGate blockNextDelete() => _blockedDelete = _AsyncGate();
+
   @override
   Future<void> delete(String profileId) async {
+    final gate = _blockedDelete;
+    if (gate != null) {
+      _blockedDelete = null;
+      gate.started.complete();
+      await gate.release.future;
+    }
     _values.remove(profileId);
   }
 
@@ -874,12 +963,26 @@ final class _ControlledProfileStore implements AiProfileStore {
 
   final AiProfileRepository _delegate;
   bool failNextSave = false;
+  _AsyncGate? _blockedSave;
+  _AsyncGate? _blockedLoad;
+
+  _AsyncGate blockNextSave() => _blockedSave = _AsyncGate();
+  _AsyncGate blockNextLoad() => _blockedLoad = _AsyncGate();
 
   @override
   Future<void> clearActive() => _delegate.clearActive();
 
   @override
-  Future<AiProviderProfile?> loadActive() => _delegate.loadActive();
+  Future<AiProviderProfile?> loadActive() async {
+    final snapshot = await _delegate.loadActive();
+    final gate = _blockedLoad;
+    if (gate != null) {
+      _blockedLoad = null;
+      gate.started.complete();
+      await gate.release.future;
+    }
+    return snapshot;
+  }
 
   @override
   Future<void> saveActive(AiProviderProfile profile) {
@@ -887,7 +990,14 @@ final class _ControlledProfileStore implements AiProfileStore {
       failNextSave = false;
       return Future<void>.error(StateError('controlled profile save failure'));
     }
-    return _delegate.saveActive(profile);
+    final gate = _blockedSave;
+    if (gate == null) return _delegate.saveActive(profile);
+    _blockedSave = null;
+    return () async {
+      gate.started.complete();
+      await gate.release.future;
+      await _delegate.saveActive(profile);
+    }();
   }
 }
 

@@ -49,6 +49,7 @@ class AgentController extends ChangeNotifier {
   _AgentOperation? _activeOperation;
   int _nextOperationId = 0;
   int _messageLoadGeneration = 0;
+  Future<void> _configurationQueue = Future<void>.value();
   bool _disposed = false;
 
   bool get hasSession => currentSessionId != null;
@@ -75,7 +76,9 @@ class AgentController extends ChangeNotifier {
     return null;
   }
 
-  Future<void> bootstrap() async {
+  Future<void> bootstrap() => _enqueueConfiguration(_bootstrap);
+
+  Future<void> _bootstrap() async {
     final generation = ++_messageLoadGeneration;
     loadingSessions = true;
     loadingMessages = true;
@@ -139,6 +142,13 @@ class AgentController extends ChangeNotifier {
   Future<void> saveConfiguration({
     required AiProviderProfile profile,
     String credential = '',
+  }) => _enqueueConfiguration(
+    () => _saveConfiguration(profile: profile, credential: credential),
+  );
+
+  Future<void> _saveConfiguration({
+    required AiProviderProfile profile,
+    required String credential,
   }) async {
     final previousMemoryProfile = this.profile;
     final previousMemoryHasCredential = hasCredential;
@@ -196,7 +206,9 @@ class AgentController extends ChangeNotifier {
     _notify();
   }
 
-  Future<void> deleteCredential() async {
+  Future<void> deleteCredential() => _enqueueConfiguration(_deleteCredential);
+
+  Future<void> _deleteCredential() async {
     final activeProfile = profile;
     if (activeProfile == null) return;
     error = null;
@@ -219,6 +231,15 @@ class AgentController extends ChangeNotifier {
     }
     _notify();
   }
+
+  Future<T> _enqueueConfiguration<T>(Future<T> Function() operation) {
+    final result = _configurationQueue.then((_) => operation());
+    _configurationQueue = result.then<void>((_) {}, onError: (_) {});
+    return result;
+  }
+
+  Future<bool> hasCredentialFor(AiProviderProfile candidate) =>
+      _credentials.has(aiCredentialId(candidate));
 
   Future<void> startNewSession() async {
     if (sending || _disposed) return;

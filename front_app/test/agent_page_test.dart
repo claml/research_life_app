@@ -137,6 +137,45 @@ void main() {
     );
   });
 
+  testWidgets('switching back reuses that provider credential without reveal', (
+    tester,
+  ) async {
+    final fixture = _AgentPageFixture(configured: true);
+    const deepSeek = AiProviderProfile(
+      id: 'primary',
+      provider: 'deepseek',
+      displayName: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com',
+      model: 'deepseek-v4-flash',
+      requiresCredential: true,
+    );
+    fixture.credentials.values[aiCredentialId(deepSeek)] = 'deepseek-old-key';
+    fixture.credentials.values[aiCredentialId(_profile)] = 'openai-old-key';
+    await fixture.pump(tester);
+    await tester.tap(find.byKey(const Key('agent-settings')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('agent-provider')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek').last);
+    await tester.pumpAndSettle();
+    final keyField = tester.widget<TextField>(
+      find.byKey(const Key('agent-api-key')),
+    );
+    expect(keyField.controller!.text, isEmpty);
+    expect(keyField.obscureText, isTrue);
+    await tester.tap(find.byKey(const Key('agent-save-settings')));
+    await tester.pumpAndSettle();
+    expect(fixture.profiles.active, deepSeek);
+    expect(
+      await fixture.credentials.read(aiCredentialId(deepSeek)),
+      'deepseek-old-key',
+    );
+    expect(
+      await fixture.credentials.read(aiCredentialId(_profile)),
+      'openai-old-key',
+    );
+  });
+
   testWidgets('credential delete is confirmed without deleting local history', (
     tester,
   ) async {
@@ -674,6 +713,7 @@ final class _ScriptedAdapter implements HttpClientAdapter {
   final List<Future<ResponseBody> Function(RequestOptions, Future<void>?)>
   _actions = <Future<ResponseBody> Function(RequestOptions, Future<void>?)>[];
   int calls = 0;
+  final List<Object?> authorizationHeaders = <Object?>[];
   Completer<void> requestStarted = Completer<void>();
 
   void replyNext(String content) {
@@ -709,6 +749,7 @@ final class _ScriptedAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     calls += 1;
+    authorizationHeaders.add(options.headers['authorization']);
     if (!requestStarted.isCompleted) requestStarted.complete();
     if (_actions.isEmpty) {
       throw StateError('No scripted HTTP response');

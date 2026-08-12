@@ -8,7 +8,6 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../app/local_services_scope.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../services/agent/agent_models.dart';
-import '../../services/agent/ai_credential_store.dart';
 import '../../services/agent/ai_profile.dart';
 import 'state/agent_controller.dart';
 
@@ -843,6 +842,9 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
   late final TextEditingController _modelController;
   late final TextEditingController _credentialController;
   bool _saving = false;
+  bool _checkingCredential = false;
+  bool _selectedHasCredential = false;
+  int _credentialCheckGeneration = 0;
   String? _validationError;
 
   @override
@@ -861,10 +863,13 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
     );
     // Credentials are deliberately never read into the settings surface.
     _credentialController = TextEditingController();
+    _selectedHasCredential = widget.controller.hasCredential;
+    _baseUrlController.addListener(_refreshSelectedCredential);
   }
 
   @override
   void dispose() {
+    _baseUrlController.removeListener(_refreshSelectedCredential);
     _baseUrlController.dispose();
     _modelController.dispose();
     _credentialController.dispose();
@@ -878,22 +883,37 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
       _modelController.text = preset.model;
       _validationError = null;
     });
+    _refreshSelectedCredential();
   }
 
-  bool get _selectedIdentityHasCredential {
+  AiProviderProfile? get _selectedProfile {
     final active = widget.controller.profile;
     final baseUrl = _baseUrlController.text.trim();
-    if (active == null || baseUrl.isEmpty || !widget.controller.hasCredential) {
-      return false;
-    }
-    final selected = _preset.toProfile(
+    if (active == null || baseUrl.isEmpty) return null;
+    return _preset.toProfile(
       id: active.id,
       baseUrl: baseUrl,
       model: _modelController.text.trim().isEmpty
           ? active.model
           : _modelController.text.trim(),
     );
-    return aiCredentialId(active) == aiCredentialId(selected);
+  }
+
+  Future<void> _refreshSelectedCredential() async {
+    final generation = ++_credentialCheckGeneration;
+    final selected = _selectedProfile;
+    setState(() {
+      _checkingCredential = selected != null;
+      _selectedHasCredential = false;
+    });
+    final available = selected == null
+        ? false
+        : await widget.controller.hasCredentialFor(selected);
+    if (!mounted || generation != _credentialCheckGeneration) return;
+    setState(() {
+      _checkingCredential = false;
+      _selectedHasCredential = available;
+    });
   }
 
   Future<void> _save() async {
@@ -905,7 +925,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
       return;
     }
     if (_preset.requiresCredential &&
-        !_selectedIdentityHasCredential &&
+        !_selectedHasCredential &&
         credential.isEmpty) {
       setState(() => _validationError = '请输入 API Key。');
       return;
@@ -1022,7 +1042,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
                   labelText: _preset.requiresCredential
                       ? 'API Key'
                       : 'API Key（可选）',
-                  hintText: _selectedIdentityHasCredential ? '留空以保留现有凭据' : null,
+                  hintText: _selectedHasCredential ? '留空以保留现有凭据' : null,
                   border: const OutlineInputBorder(),
                 ),
               ),
@@ -1061,7 +1081,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
         ),
         FilledButton(
           key: const Key('agent-save-settings'),
-          onPressed: _saving ? null : _save,
+          onPressed: _saving || _checkingCredential ? null : _save,
           child: Text(_saving ? '保存中…' : '保存'),
         ),
       ],
