@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
-import '../../app/app_section.dart';
 import '../../app/research_life_scope.dart';
+import '../../app/workbench_destination.dart';
 import '../../core/models/app_models.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../services/search/global_search_service.dart';
@@ -18,7 +18,7 @@ const Map<SearchKind, String> _kindLabels = {
 class SearchPage extends StatefulWidget {
   const SearchPage({required this.onNavigate, super.key});
 
-  final ValueChanged<AppSection> onNavigate;
+  final ValueChanged<WorkbenchTab> onNavigate;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -43,18 +43,19 @@ class _SearchPageState extends State<SearchPage> {
         final document = result.target as PdfLibraryDocument;
         if (document.fileKind.isPdf) {
           controller.requestOpenReading(documentId: document.id);
+          widget.onNavigate(WorkbenchTab.researchReading);
         } else {
           controller.requestOpenDocumentView(documentId: document.id);
+          widget.onNavigate(WorkbenchTab.materialsDocumentView);
         }
-      // requestOpen* 会自动触发 AppShell 切换到对应页面。
       case SearchKind.event:
-        widget.onNavigate(AppSection.calendar);
+        widget.onNavigate(WorkbenchTab.todayCalendar);
       case SearchKind.person:
-        widget.onNavigate(AppSection.persons);
+        widget.onNavigate(WorkbenchTab.researchPersons);
       case SearchKind.session:
-        widget.onNavigate(AppSection.history);
+        widget.onNavigate(WorkbenchTab.researchAnalysis);
       case SearchKind.place:
-        widget.onNavigate(AppSection.campusMap);
+        widget.onNavigate(WorkbenchTab.lifeCampus);
     }
   }
 
