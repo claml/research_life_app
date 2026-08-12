@@ -24,6 +24,9 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _settingsSearchController;
   late final TextEditingController _calendarInputController;
+  late final TextEditingController _weatherApiKeyController;
+  late final TextEditingController _weatherApiHostController;
+  bool _weatherApiKeyVisible = false;
   String? _syncedCalendarEditSessionId;
   String _settingsQuery = '';
   _SettingsCategory _selectedCategory = _SettingsCategory.all;
@@ -34,17 +37,30 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _settingsSearchController = TextEditingController();
     _calendarInputController = TextEditingController();
+    _weatherApiKeyController = TextEditingController();
+    _weatherApiHostController = TextEditingController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final controller = ResearchLifeScope.of(context);
       unawaited(controller.ensureHomeGalleryReady());
       unawaited(controller.ensurePetCompanionLoaded());
+      unawaited(_loadWeatherSettings(controller));
     });
+  }
+
+  Future<void> _loadWeatherSettings(ResearchLifeController controller) async {
+    await controller.ensureWeatherApiLoaded();
+    if (!mounted) return;
+    _weatherApiKeyController.text = controller.weatherApiKey;
+    _weatherApiHostController.text = controller.weatherApiHost;
+    setState(() {});
   }
 
   @override
   void dispose() {
     _settingsSearchController.dispose();
     _calendarInputController.dispose();
+    _weatherApiKeyController.dispose();
+    _weatherApiHostController.dispose();
     super.dispose();
   }
 
@@ -73,6 +89,28 @@ class _SettingsPageState extends State<SettingsPage> {
             : '当前已导入$importedCount 条校历事件${controller.institutionCalendarTitle == null ? '' : ' · ${controller.institutionCalendarTitle}'}';
 
         final sections = <_SettingsSectionSpec>[
+          _SettingsSectionSpec(
+            id: 'home.weather',
+            category: _SettingsCategory.general,
+            icon: Icons.cloud_outlined,
+            title: '主页天气',
+            subtitle: '配置天气服务，仅在本机保存。',
+            keywords: const ['天气', 'API Key', 'API Host', '和风天气'],
+            childBuilder: (_) => _WeatherSettingsPanel(
+              apiKeyController: _weatherApiKeyController,
+              apiHostController: _weatherApiHostController,
+              apiKeyVisible: _weatherApiKeyVisible,
+              onApiKeyVisibilityChanged: (visible) =>
+                  setState(() => _weatherApiKeyVisible = visible),
+              onSave: () => _runAsyncAction(
+                context,
+                () => controller.saveWeatherApiSettings(
+                  apiKey: _weatherApiKeyController.text,
+                  apiHost: _weatherApiHostController.text,
+                ),
+              ),
+            ),
+          ),
           _SettingsSectionSpec(
             id: 'storage.local_backup',
             category: _SettingsCategory.storage,
@@ -1397,6 +1435,7 @@ class _WeatherSettingsPanel extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         TextField(
+          key: const Key('weather-api-key'),
           controller: apiKeyController,
           obscureText: !apiKeyVisible,
           decoration: InputDecoration(
@@ -1415,6 +1454,7 @@ class _WeatherSettingsPanel extends StatelessWidget {
         ),
         const SizedBox(height: 12),
         TextField(
+          key: const Key('weather-api-host'),
           controller: apiHostController,
           decoration: const InputDecoration(
             labelText: 'API Host',
@@ -1431,6 +1471,7 @@ class _WeatherSettingsPanel extends StatelessWidget {
         ),
         const SizedBox(height: 14),
         OutlinedButton.icon(
+          key: const Key('weather-settings-save'),
           onPressed: onSave,
           icon: const Icon(Icons.save_rounded),
           label: const Text('保存并刷新天气'),

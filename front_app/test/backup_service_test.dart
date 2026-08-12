@@ -256,6 +256,77 @@ void main() {
       expect(legacyPreferences, isNot(contains('weather-secret')));
     });
 
+    test(
+      'sanitizes secrets actually stored in legacy preferences json',
+      () async {
+        final fixture = await _BackupFixture.create();
+        addTearDown(fixture.dispose);
+        await fixture.writeDatabaseValue('legacy-json-secrets');
+        await fixture.writeLegacyPreferences(<String, Object?>{
+          'agentLlmSettings': <String, Object?>{'apiKey': 'agent-json-secret'},
+          'remoteLlmAnalysisSettings': <String, Object?>{
+            'apiKey': 'analysis-json-secret',
+          },
+          'weatherApiKey': 'weather-json-secret',
+          'colorTheme': 'green',
+        });
+
+        final result = await fixture.service.createBackup();
+        final preferencesFile = File(
+          '${result.directory.path}${Platform.pathSeparator}preferences.json',
+        );
+        final manifestFile = File(
+          '${result.directory.path}${Platform.pathSeparator}backup_manifest.json',
+        );
+        final preferencesBytes = String.fromCharCodes(
+          await preferencesFile.readAsBytes(),
+        );
+        final manifestBytes = String.fromCharCodes(
+          await manifestFile.readAsBytes(),
+        );
+        final decoded = (jsonDecode(preferencesBytes) as Map)
+            .cast<String, Object?>();
+
+        for (final secret in const [
+          'agent-json-secret',
+          'analysis-json-secret',
+          'weather-json-secret',
+        ]) {
+          expect(preferencesBytes, isNot(contains(secret)));
+          expect(manifestBytes, isNot(contains(secret)));
+        }
+        expect(decoded, <String, Object?>{'colorTheme': 'green'});
+      },
+    );
+
+    for (final invalid in <String>[
+      '{"weatherApiKey":"source-secret"',
+      '["source-secret"]',
+    ]) {
+      test(
+        'rejects unsafe legacy preferences shape without publishing: $invalid',
+        () async {
+          final fixture = await _BackupFixture.create();
+          addTearDown(fixture.dispose);
+          await fixture.writeDatabaseValue('invalid-legacy-json');
+          await fixture.writeRawLegacyPreferences(invalid);
+          final sourceFile = await fixture.workspaceService
+              .resolvePreferencesFile();
+          final sourceBytes = await sourceFile.readAsBytes();
+
+          await expectLater(
+            fixture.service.createBackup(),
+            throwsA(isA<BackupException>()),
+          );
+
+          expect(await sourceFile.readAsBytes(), sourceBytes);
+          final backups = await fixture.workspaceService
+              .resolveBackupsDirectory();
+          expect(await backups.list().toList(), isEmpty);
+        },
+      );
+    }
+
     test('persists backup purpose in the validated manifest', () async {
       final fixture = await _BackupFixture.create(
         timestamp: DateTime(2026, 8, 9, 10),
@@ -937,6 +1008,16 @@ class _BackupFixture {
     } finally {
       database.close();
     }
+  }
+
+  Future<void> writeLegacyPreferences(Map<String, Object?> values) async {
+    await writeRawLegacyPreferences(jsonEncode(values));
+  }
+
+  Future<void> writeRawLegacyPreferences(String contents) async {
+    final preferencesFile = await workspaceService.resolvePreferencesFile();
+    await preferencesFile.parent.create(recursive: true);
+    await preferencesFile.writeAsString(contents);
   }
 
   Future<String> readDatabaseValue() async {

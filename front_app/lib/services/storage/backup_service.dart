@@ -661,23 +661,23 @@ class BackupService {
   }
 
   Future<void> _sanitizeBackupPreferences(File preferencesFile) async {
+    final Object? decoded;
     try {
-      final decoded = jsonDecode(await preferencesFile.readAsString());
-      if (decoded is! Map) {
-        return;
-      }
-      final sanitized = Map<String, Object?>.from(decoded.cast());
-      sanitized
-        ..remove(PreferencesRepository.agentLlmSettingsKey)
-        ..remove(PreferencesRepository.remoteLlmAnalysisSettingsKey)
-        ..remove(PreferencesRepository.weatherApiKeyKey);
-      await preferencesFile.writeAsString(
-        const JsonEncoder.withIndent('  ').convert(sanitized),
-      );
+      decoded = jsonDecode(await preferencesFile.readAsString());
     } on FormatException {
-      // Structural validation remains responsible for malformed preference
-      // files. Sanitization is intentionally limited to recognized JSON maps.
+      throw BackupValidationException('备份偏好文件无效，已取消备份。');
     }
+    if (decoded is! Map) {
+      throw BackupValidationException('备份偏好文件无效，已取消备份。');
+    }
+    final sanitized = Map<String, Object?>.from(decoded.cast());
+    sanitized
+      ..remove(PreferencesRepository.agentLlmSettingsKey)
+      ..remove(PreferencesRepository.remoteLlmAnalysisSettingsKey)
+      ..remove(PreferencesRepository.weatherApiKeyKey);
+    await preferencesFile.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(sanitized),
+    );
   }
 
   Future<void> _cleanupRollbackArtifact(FileSystemEntity entity) async {
