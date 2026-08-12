@@ -518,7 +518,7 @@ class _SettingsPageState extends State<SettingsPage> {
             category: _SettingsCategory.security,
             icon: Icons.lock_rounded,
             title: '锁屏密码',
-            subtitle: '长时间未操作或重新启动后，需要输入 PIN 才能进入。',
+            subtitle: '可调整无人操作后的自动锁定时间，重新启动仍需 PIN。',
             keywords: const ['锁屏', '密码', 'PIN', '安全', '锁定', 'unlock'],
             childBuilder: (_) => _PinLockPanel(controller: controller),
           ),
@@ -2363,11 +2363,13 @@ class _PinLockPanel extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
-            '开启后，长时间未操作（默认 5 分钟）或重新启动软件，都需要输入 PIN 解锁。',
+            '开启后，无人操作达到设定时间或重新启动软件，都需要输入 PIN 解锁。',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: tokens.textSecondary,
             ),
           ),
+          const SizedBox(height: 12),
+          _IdleLockTimeoutPicker(controller: controller),
           const SizedBox(height: 12),
           FilledButton.icon(
             onPressed: () => _openDialog(context, _PinDialogMode.setup),
@@ -2388,6 +2390,8 @@ class _PinLockPanel extends StatelessWidget {
             color: tokens.textSecondary,
           ),
         ),
+        const SizedBox(height: 14),
+        _IdleLockTimeoutPicker(controller: controller),
         const SizedBox(height: 14),
         Wrap(
           spacing: 10,
@@ -2412,6 +2416,52 @@ class _PinLockPanel extends StatelessWidget {
         ),
       ],
     );
+  }
+}
+
+class _IdleLockTimeoutPicker extends StatelessWidget {
+  const _IdleLockTimeoutPicker({required this.controller});
+
+  static const _options = <Duration>[
+    Duration(minutes: 15),
+    Duration(minutes: 30),
+    Duration(hours: 1),
+    Duration(hours: 3),
+    Duration(hours: 6),
+    Duration(hours: 12),
+  ];
+
+  final ResearchLifeController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 320),
+      child: DropdownButtonFormField<Duration>(
+        key: const Key('idle-lock-timeout'),
+        initialValue: controller.idleLockTimeout,
+        decoration: const InputDecoration(
+          labelText: '无人操作后自动锁定',
+          prefixIcon: Icon(Icons.timer_outlined),
+        ),
+        items: [
+          for (final duration in _options)
+            DropdownMenuItem(value: duration, child: Text(_labelFor(duration))),
+        ],
+        onChanged: (duration) {
+          if (duration != null) {
+            controller.setIdleLockTimeout(duration);
+          }
+        },
+      ),
+    );
+  }
+
+  static String _labelFor(Duration duration) {
+    if (duration.inMinutes < 60) {
+      return '${duration.inMinutes} 分钟';
+    }
+    return '${duration.inHours} 小时';
   }
 }
 

@@ -32,6 +32,7 @@ class PreferencesRepository implements LocalMigrationPreferences {
   static const glassSettingsKey = 'glassSettings';
   static const calendarReminderEnabledKey = 'calendarReminderEnabled';
   static const pinLockKey = 'pinLock';
+  static const idleLockTimeoutMinutesKey = 'idleLockTimeoutMinutes';
   static const localMigrationBackupCompleteKey =
       'local_mode.migration_backup_v1.complete';
   static const localMigrationBackupPathKey =
@@ -191,6 +192,14 @@ class PreferencesRepository implements LocalMigrationPreferences {
 
   Future<void> deletePinLock() {
     return deleteString(pinLockKey);
+  }
+
+  Future<int?> loadIdleLockTimeoutMinutes() async {
+    return int.tryParse(await loadString(idleLockTimeoutMinutesKey) ?? '');
+  }
+
+  Future<void> saveIdleLockTimeoutMinutes(int minutes) {
+    return saveString(idleLockTimeoutMinutesKey, minutes.toString());
   }
 
   @override

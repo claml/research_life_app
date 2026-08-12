@@ -309,7 +309,8 @@ class ResearchLifeController extends ChangeNotifier {
   bool _pinLockBusy = false;
   bool _isLocked = false;
   Timer? _idleLockTimer;
-  static const idleLockTimeout = Duration(minutes: 5);
+  static const defaultIdleLockTimeout = Duration(hours: 3);
+  Duration _idleLockTimeout = defaultIdleLockTimeout;
   bool _sessionHistoryLoaded = false;
   bool _sessionHistoryBusy = false;
   Future<void> _pendingSessionPersistence = Future<void>.value();
@@ -753,6 +754,8 @@ class ResearchLifeController extends ChangeNotifier {
   /// 是否启用了锁屏 PIN。
   bool get pinLockEnabled => _pinLockEnabled;
 
+  Duration get idleLockTimeout => _idleLockTimeout;
+
   /// 是否处于锁定状态（需要输入 PIN 解锁）。
   bool get isLocked => _isLocked;
 
@@ -800,6 +803,13 @@ class ResearchLifeController extends ChangeNotifier {
 
     _pinLockBusy = true;
     try {
+      final storedTimeoutMinutes = await _preferencesRepository
+          ?.loadIdleLockTimeoutMinutes();
+      if (storedTimeoutMinutes != null &&
+          storedTimeoutMinutes >= 15 &&
+          storedTimeoutMinutes <= 12 * 60) {
+        _idleLockTimeout = Duration(minutes: storedTimeoutMinutes);
+      }
       final raw = await _preferencesRepository?.loadPinLock();
       if (raw != null && raw.trim().isNotEmpty) {
         final decoded = jsonDecode(raw);
@@ -898,6 +908,26 @@ class ResearchLifeController extends ChangeNotifier {
     _startIdleLockTimer();
   }
 
+  Future<void> setIdleLockTimeout(Duration timeout) async {
+    final minutes = timeout.inMinutes;
+    if (minutes < 15 || minutes > 12 * 60) {
+      throw ArgumentError.value(
+        timeout,
+        'timeout',
+        'must be between 15 minutes and 12 hours',
+      );
+    }
+    if (_idleLockTimeout == timeout) {
+      return;
+    }
+    _idleLockTimeout = timeout;
+    await _preferencesRepository?.saveIdleLockTimeoutMinutes(minutes);
+    if (_pinLockEnabled && !_isLocked) {
+      _startIdleLockTimer();
+    }
+    notifyListeners();
+  }
+
   bool _verifyPinHash(String pin) {
     if (_pinLockHash == null || _pinLockSalt == null) {
       return false;
@@ -922,7 +952,7 @@ class ResearchLifeController extends ChangeNotifier {
     if (!_pinLockEnabled) {
       return;
     }
-    _idleLockTimer = Timer(idleLockTimeout, lock);
+    _idleLockTimer = Timer(_idleLockTimeout, lock);
   }
 
   void _stopIdleLockTimer() {

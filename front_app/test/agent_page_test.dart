@@ -258,7 +258,10 @@ void main() {
     await fixture.pump(tester);
 
     expect(find.text('Final answer'), findsOneWidget);
-    expect(find.textContaining('INTERNAL_REASONING_MUST_NOT_RENDER'), findsNothing);
+    expect(
+      find.textContaining('INTERNAL_REASONING_MUST_NOT_RENDER'),
+      findsNothing,
+    );
     expect(find.textContaining('思考摘要'), findsNothing);
   });
 
@@ -359,6 +362,18 @@ void main() {
     expect(find.byKey(const Key('agent-settings')), findsOneWidget);
     expect(find.byKey(const Key('agent-composer')), findsOneWidget);
     expect(find.byKey(const Key('agent-send')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Agent chrome uses coordinated dark-rail controls and top bar', (
+    tester,
+  ) async {
+    final fixture = _AgentPageFixture(configured: true);
+    await fixture.pump(tester);
+
+    expect(tester.getSize(find.byKey(const Key('agent-top-bar'))).height, 72);
+    expect(find.byKey(const Key('agent-new-session')), findsOneWidget);
+    expect(find.byKey(const Key('agent-collapse-history')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

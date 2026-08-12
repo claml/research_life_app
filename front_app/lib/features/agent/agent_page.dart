@@ -189,10 +189,11 @@ class _AgentTopBar extends StatelessWidget {
     final tokens = context.tokens;
     final profile = controller.profile;
     return Container(
-      height: 64,
-      padding: EdgeInsets.symmetric(horizontal: narrow ? 12 : 22),
+      key: const Key('agent-top-bar'),
+      height: 72,
+      padding: EdgeInsets.symmetric(horizontal: narrow ? 12 : 18),
       decoration: BoxDecoration(
-        color: tokens.panelSurface.withValues(alpha: 0.78),
+        color: tokens.panelSurface.withValues(alpha: 0.94),
         border: Border(bottom: BorderSide(color: tokens.borderFaint)),
       ),
       child: Row(
@@ -202,11 +203,28 @@ class _AgentTopBar extends StatelessWidget {
               tooltip: '关闭 AI 助手',
               onPressed: () => Navigator.of(context).pop(),
               icon: const Icon(Icons.close_rounded),
+              style: IconButton.styleFrom(
+                fixedSize: const Size(40, 40),
+                backgroundColor: tokens.panelSubtle,
+                foregroundColor: tokens.textPrimary,
+              ),
             ),
             const SizedBox(width: 6),
           ],
-          Icon(Icons.auto_awesome_rounded, color: tokens.accent, size: 20),
-          const SizedBox(width: 10),
+          Container(
+            width: 36,
+            height: 36,
+            decoration: BoxDecoration(
+              color: tokens.accentSoft,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              Icons.auto_awesome_rounded,
+              color: tokens.accent,
+              size: 19,
+            ),
+          ),
+          const SizedBox(width: 12),
           Expanded(
             child: Text(
               'AI 助手',
@@ -250,6 +268,11 @@ class _AgentTopBar extends StatelessWidget {
             tooltip: '配置 AI',
             onPressed: onOpenSettings,
             icon: const Icon(Icons.settings_outlined),
+            style: IconButton.styleFrom(
+              fixedSize: const Size(40, 40),
+              backgroundColor: tokens.panelSubtle,
+              foregroundColor: tokens.textPrimary,
+            ),
           ),
         ],
       ),
@@ -304,6 +327,7 @@ class _HistoryRail extends StatelessWidget {
                     children: [
                       Expanded(
                         child: FilledButton.icon(
+                          key: const Key('agent-new-session'),
                           onPressed: controller.isBusy
                               ? null
                               : () => controller.startNewSession(),
@@ -324,6 +348,12 @@ class _HistoryRail extends StatelessWidget {
                         tooltip: '收起历史记录',
                         onPressed: onCollapse,
                         color: Colors.white70,
+                        style: IconButton.styleFrom(
+                          backgroundColor: Colors.white.withValues(alpha: 0.08),
+                          hoverColor: Colors.white.withValues(alpha: 0.12),
+                          highlightColor: Colors.transparent,
+                          disabledBackgroundColor: Colors.transparent,
+                        ),
                         icon: const Icon(Icons.chevron_left_rounded),
                       ),
                     ],
@@ -401,6 +431,9 @@ class _HistoryTile extends StatelessWidget {
       child: InkWell(
         onTap: onOpen,
         borderRadius: BorderRadius.circular(11),
+        hoverColor: Colors.white.withValues(alpha: 0.06),
+        highlightColor: Colors.transparent,
+        splashColor: Colors.white.withValues(alpha: 0.1),
         child: Padding(
           padding: const EdgeInsets.fromLTRB(11, 7, 2, 7),
           child: Row(
@@ -422,6 +455,11 @@ class _HistoryTile extends StatelessWidget {
                 onPressed: onDelete,
                 iconSize: 17,
                 color: Colors.white54,
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.transparent,
+                  hoverColor: Colors.white.withValues(alpha: 0.1),
+                  highlightColor: Colors.transparent,
+                ),
                 icon: const Icon(Icons.delete_outline_rounded),
               ),
             ],

@@ -676,7 +676,8 @@ class _SidebarNavButton extends StatelessWidget {
                   children: [
                     if (selected)
                       Positioned(
-                        left: collapsed ? 2 : 0,
+                        key: const Key('sidebar-selected-indicator'),
+                        left: 0,
                         top: 12,
                         bottom: 12,
                         child: Container(
@@ -692,6 +693,7 @@ class _SidebarNavButton extends StatelessWidget {
                           ? MainAxisAlignment.center
                           : MainAxisAlignment.start,
                       children: [
+                        if (!collapsed) const SizedBox(width: 8),
                         Icon(icon, size: 20, color: Colors.white),
                         if (!collapsed) ...[
                           const SizedBox(width: 12),

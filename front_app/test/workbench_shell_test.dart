@@ -77,6 +77,21 @@ void main() {
     );
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets('selected navigation indicator stays left of its icon', (
+    tester,
+  ) async {
+    await _setSurface(tester, const Size(1280, 800));
+    await tester.pumpWidget(_testShell());
+
+    final indicator = find.byKey(const Key('sidebar-selected-indicator'));
+    final selectedIcon = find.byIcon(Icons.today_outlined);
+    expect(indicator, findsOneWidget);
+    expect(
+      tester.getCenter(indicator).dx,
+      lessThan(tester.getCenter(selectedIcon).dx),
+    );
+  });
 }
 
 Widget _testShell({WorkbenchNavigationController? navigation}) {

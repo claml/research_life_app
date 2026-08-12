@@ -97,6 +97,17 @@ void main() {
 
     expect(await preferences.loadWeatherApiKey(), 'new-key');
     expect(await preferences.loadWeatherApiHost(), 'new.example.com');
+
+    await tester.ensureVisible(find.byKey(const Key('idle-lock-timeout')));
+    await tester.pumpAndSettle();
+    expect(lifeController.idleLockTimeout, const Duration(hours: 3));
+    await tester.tap(find.byKey(const Key('idle-lock-timeout')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('6 小时').last);
+    await tester.pumpAndSettle();
+
+    expect(lifeController.idleLockTimeout, const Duration(hours: 6));
+    expect(await preferences.loadIdleLockTimeoutMinutes(), 360);
   });
 }
 
