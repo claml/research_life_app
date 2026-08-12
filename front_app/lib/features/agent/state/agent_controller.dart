@@ -514,7 +514,7 @@ class AgentController extends ChangeNotifier {
         sessionId: sessionId,
         role: 'assistant',
         content: completion.content,
-        reasoningContent: completion.reasoningContent,
+        reasoningContent: null,
         model: completion.model ?? request.profile.model,
       );
     } on Object {
@@ -523,7 +523,7 @@ class AgentController extends ChangeNotifier {
         sessionId: sessionId,
         role: 'assistant',
         content: completion.content,
-        reasoningContent: completion.reasoningContent,
+        reasoningContent: null,
         model: completion.model ?? request.profile.model,
         createdAt: DateTime.now(),
       );
@@ -596,7 +596,7 @@ class AgentController extends ChangeNotifier {
         sessionId: volatileMessage.sessionId,
         role: 'assistant',
         content: volatileMessage.content,
-        reasoningContent: volatileMessage.reasoningContent,
+        reasoningContent: null,
         model: volatileMessage.model,
       );
     } on Object {

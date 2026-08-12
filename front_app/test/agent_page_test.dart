@@ -247,6 +247,21 @@ void main() {
     expect(find.textContaining('model-a'), findsOneWidget);
   });
 
+  testWidgets('assistant internal reasoning is never rendered', (tester) async {
+    final fixture = _AgentPageFixture(configured: true)
+      ..seedSession(
+        title: 'Private reasoning',
+        user: 'Hello',
+        assistant: 'Final answer',
+        reasoningContent: 'INTERNAL_REASONING_MUST_NOT_RENDER',
+      );
+    await fixture.pump(tester);
+
+    expect(find.text('Final answer'), findsOneWidget);
+    expect(find.textContaining('INTERNAL_REASONING_MUST_NOT_RENDER'), findsNothing);
+    expect(find.textContaining('思考摘要'), findsNothing);
+  });
+
   testWidgets(
     'send failure offers retry without duplicating the user message',
     (tester) async {
@@ -430,12 +445,14 @@ final class _AgentPageFixture {
     required String title,
     required String user,
     String? assistant,
+    String? reasoningContent,
   }) {
     chats.seedSession(
       profile: _profile,
       title: title,
       user: user,
       assistant: assistant,
+      reasoningContent: reasoningContent,
     );
   }
 
@@ -599,6 +616,7 @@ final class _MemoryChatStore implements AgentChatStore {
     required String title,
     required String user,
     String? assistant,
+    String? reasoningContent,
   }) {
     final now = DateTime(2026, 8, 12, 9, _nextSessionId);
     final session = AgentChatSession(
@@ -613,7 +631,13 @@ final class _MemoryChatStore implements AgentChatStore {
     messages[session.id] = [
       _message(session.id, 'user', user),
       if (assistant != null)
-        _message(session.id, 'assistant', assistant, model: profile.model),
+        _message(
+          session.id,
+          'assistant',
+          assistant,
+          reasoningContent: reasoningContent,
+          model: profile.model,
+        ),
     ];
   }
 

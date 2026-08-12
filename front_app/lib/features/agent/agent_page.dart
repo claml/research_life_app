@@ -602,23 +602,6 @@ class _MessageBubble extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            if (message.reasoningContent case final reasoning?
-                when reasoning.trim().isNotEmpty) ...[
-              Text(
-                '思考摘要',
-                style: TextStyle(
-                  color: tokens.textMuted,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              const SizedBox(height: 5),
-              Text(
-                reasoning,
-                style: TextStyle(color: tokens.textSecondary, height: 1.45),
-              ),
-              Divider(color: tokens.borderFaint, height: 20),
-            ],
             if (isUser)
               SelectableText(
                 message.content,

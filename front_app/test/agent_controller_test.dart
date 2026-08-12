@@ -101,7 +101,11 @@ void main() {
     () async {
       await fixture.storeConfiguration();
       await fixture.controller.bootstrap();
-      fixture.adapter.replyNext('Assistant answer', model: 'served-model');
+      fixture.adapter.replyNext(
+        'Assistant answer',
+        model: 'served-model',
+        reasoningContent: 'INTERNAL_REASONING_MUST_NOT_PERSIST',
+      );
       const question = '12345678901234567890123456789012345';
 
       await fixture.controller.sendMessage(question);
@@ -111,6 +115,7 @@ void main() {
       expect(stored.map((message) => message.role), ['user', 'assistant']);
       expect(stored.last.content, 'Assistant answer');
       expect(stored.last.model, 'served-model');
+      expect(stored.last.reasoningContent, isNull);
       expect(session.title, '12345678901234567890123456789…');
       expect(session.model, 'served-model');
     },
@@ -1129,9 +1134,17 @@ final class _ScriptedAdapter implements HttpClientAdapter {
   Completer<void> requestStarted = Completer<void>();
   Completer<ResponseBody>? _blocked;
 
-  void replyNext(String content, {String model = 'model-a'}) {
+  void replyNext(
+    String content, {
+    String model = 'model-a',
+    String? reasoningContent,
+  }) {
     _actions.add((options, cancelFuture) async {
-      return _response(content, model: model);
+      return _response(
+        content,
+        model: model,
+        reasoningContent: reasoningContent,
+      );
     });
   }
 
@@ -1195,12 +1208,20 @@ final class _ScriptedAdapter implements HttpClientAdapter {
   @override
   void close({bool force = false}) {}
 
-  ResponseBody _response(String content, {required String model}) {
+  ResponseBody _response(
+    String content, {
+    required String model,
+    String? reasoningContent,
+  }) {
     return ResponseBody.fromString(
       jsonEncode({
         'choices': [
           {
-            'message': {'role': 'assistant', 'content': content},
+            'message': {
+              'role': 'assistant',
+              'content': content,
+              'reasoning_content': ?reasoningContent,
+            },
             'finish_reason': 'stop',
           },
         ],
