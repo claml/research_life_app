@@ -4,15 +4,14 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
 
-import '../../app/auth_scope.dart';
 import '../../app/research_life_scope.dart';
 import '../../core/models/app_models.dart';
 import '../../core/network/api_exception.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../core/utils/workspace_file_kind.dart';
-import '../../features/files/post_process_save_dialog.dart';
-import '../../features/files/workspace_cloud_picker.dart';
+import '../../services/pdf/pdf_operation_api.dart';
 import '../../state/research_life_controller.dart';
+import 'local_pdf_output.dart';
 import 'pdf_operation_dialogs.dart';
 
 class PdfToolsPage extends StatefulWidget {
@@ -23,8 +22,7 @@ class PdfToolsPage extends StatefulWidget {
 }
 
 class _PdfToolsPageState extends State<PdfToolsPage> {
-  final Set<int> _selectedCloudIds = {};
-  String? _selectedLocalDocumentId;
+  final List<PdfLibraryDocument> _selected = [];
   bool _busy = false;
   ResearchLifeController? _controller;
 
@@ -55,26 +53,6 @@ class _PdfToolsPageState extends State<PdfToolsPage> {
     super.dispose();
   }
 
-  List<CloudFileEntry> _selectedCloud(ResearchLifeController controller) {
-    return [
-      for (final id in _selectedCloudIds)
-        if (controller.cloudFileEntryByServerId(id) != null)
-          controller.cloudFileEntryByServerId(id)!,
-    ];
-  }
-
-  PdfLibraryDocument? _selectedLocal(ResearchLifeController controller) {
-    final id = _selectedLocalDocumentId;
-    if (id == null) {
-      return null;
-    }
-    final doc = controller.pdfDocumentById(id);
-    if (doc == null || !doc.fileKind.isPdf || doc.path.isEmpty) {
-      return null;
-    }
-    return doc;
-  }
-
   void _handlePdfToolsNavigation() {
     if (_controller?.hasPendingPdfToolsSelection == true) {
       unawaited(_consumeOpenRequest());
@@ -84,39 +62,24 @@ class _PdfToolsPageState extends State<PdfToolsPage> {
   Future<void> _consumeOpenRequest() async {
     final controller = ResearchLifeScope.read(context);
     final request = controller.consumePdfToolsOpenRequest();
-    if (request == null) {
+    final id = request?.documentId;
+    if (id == null) {
       return;
     }
-    if (request.documentId != null) {
-      final doc = controller.pdfDocumentById(request.documentId!);
-      if (doc != null && doc.fileKind.isPdf) {
-        setState(() {
-          _selectedLocalDocumentId = doc.id;
-          _selectedCloudIds.clear();
-        });
-      }
+    final document = controller.pdfDocumentById(id);
+    if (document == null || !document.fileKind.isPdf || document.path.isEmpty) {
       return;
     }
-    if (request.cloudServerId != null) {
-      final entry = controller.cloudFileEntryByServerId(request.cloudServerId!);
-      if (entry != null && WorkspaceFileKind.fromPath(entry.title).isPdf) {
-        setState(() {
-          _selectedLocalDocumentId = null;
-          _selectedCloudIds
-            ..clear()
-            ..add(entry.serverId);
-        });
-      }
-    }
+    setState(() {
+      _selected
+        ..clear()
+        ..add(document);
+    });
   }
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final auth = AuthScope.read(context);
-    final controller = ResearchLifeScope.read(context);
-    final selectedLocal = _selectedLocal(controller);
-    final selectedCloud = _selectedCloud(controller);
     return Padding(
       padding: const EdgeInsets.all(28),
       child: Column(
@@ -130,37 +93,38 @@ class _PdfToolsPageState extends State<PdfToolsPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            auth.isGuest
-                ? '本地模式：PDF 结构操作需登录后端。'
-                : '直接从云端选择 PDF 处理，完成后可选择下载到本地或上传到云端文件夹。',
+            '只使用本地 PDF；处理完成后选择保存文件夹。',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
           ),
           const SizedBox(height: 16),
-          WorkspaceCloudPicker(
-            filter: WorkspaceCloudFilter.pdfOnly,
-            multiSelect: true,
-            selectedServerIds: _selectedCloudIds,
-            onSelectionChanged: (ids) => setState(() {
-              _selectedLocalDocumentId = null;
-              _selectedCloudIds
-                ..clear()
-                ..addAll(ids);
-            }),
+          Row(
+            children: [
+              FilledButton.tonalIcon(
+                onPressed: _busy ? null : _pickLocalPdfs,
+                icon: const Icon(Icons.picture_as_pdf_outlined),
+                label: const Text('选择本地 PDF'),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _SelectedPdfSourceBar(
+                  documents: _selected,
+                  onClear: _selected.isEmpty
+                      ? null
+                      : () => setState(_selected.clear),
+                ),
+              ),
+            ],
           ),
           const SizedBox(height: 10),
-          _SelectedPdfSourceBar(
-            localDocument: selectedLocal,
-            cloudEntries: selectedCloud,
-            onClear: selectedLocal == null && selectedCloud.isEmpty
-                ? null
-                : () => setState(() {
-                    _selectedLocalDocumentId = null;
-                    _selectedCloudIds.clear();
-                  }),
+          Text(
+            '输出时会请你“选择保存文件夹”。',
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: tokens.textMuted),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
           if (_busy) const LinearProgressIndicator(),
           Expanded(
             child: SingleChildScrollView(
@@ -175,54 +139,63 @@ class _PdfToolsPageState extends State<PdfToolsPage> {
     );
   }
 
-  Future<void> _runOperation(_PdfOp op) async {
-    final auth = AuthScope.read(context);
+  Future<void> _pickLocalPdfs() async {
+    const group = XTypeGroup(label: 'PDF', extensions: ['pdf']);
+    final files = await openFiles(acceptedTypeGroups: [group]);
+    if (files.isEmpty || !mounted) {
+      return;
+    }
+    final now = DateTime.now();
+    setState(() {
+      _selected
+        ..clear()
+        ..addAll(
+          files.map(
+            (file) => PdfLibraryDocument(
+              id: 'picked-${file.path.hashCode}',
+              title: _fileStem(file.path),
+              path: file.path,
+              fileKind: WorkspaceFileKind.pdf,
+              createdAt: now,
+              updatedAt: now,
+              inReadingList: false,
+            ),
+          ),
+        );
+    });
+  }
+
+  Future<void> _runOperation(_PdfOp operation) async {
     final controller = ResearchLifeScope.read(context);
-
-    final selected = _selectedCloud(controller);
-    final selectedLocal = _selectedLocal(controller);
-
-    if (op == _PdfOp.openReader) {
-      if (selectedLocal == null && selected.isEmpty) {
+    if (operation == _PdfOp.openReader) {
+      if (_selected.length != 1) {
         _snack('请选择一个 PDF');
         return;
       }
-      try {
-        if (selectedLocal != null) {
-          controller.requestOpenReading(documentId: selectedLocal.id);
-        } else {
-          await controller.prepareCloudFileForReading(selected.first);
-          controller.requestOpenReading(cloudServerId: selected.first.serverId);
-        }
-        _snack('已在科研文献中打开');
-      } catch (error) {
-        _snack('$error');
+      final selected = _selected.single;
+      if (controller.pdfDocumentById(selected.id) == null) {
+        _snack('请先在“我的文件”中导入后阅读');
+        return;
       }
+      controller.requestOpenReading(documentId: selected.id);
       return;
     }
-
-    if (op == _PdfOp.scanToPdf) {
-      await _scanImagesToPdf(controller);
-      return;
-    }
-
-    if (auth.isGuest) {
-      _snack('请登录后使用 PDF 处理功能');
-      return;
-    }
-
-    if (_needsSelection(op) && selectedLocal == null && selected.isEmpty) {
+    if (operation != _PdfOp.scanToPdf && _selected.isEmpty) {
       _snack('请先选择 PDF');
       return;
     }
-    if (op == _PdfOp.merge && selected.length < 2) {
-      _snack('合并至少选择 2 个云端 PDF');
+    if (operation == _PdfOp.merge && _selected.length < 2) {
+      _snack('合并至少选择 2 个 PDF');
       return;
     }
 
     setState(() => _busy = true);
     try {
-      await _executeOp(controller, op, selected);
+      if (operation == _PdfOp.scanToPdf) {
+        await _scanImagesToPdf(controller);
+      } else {
+        await _executeOperation(controller, operation);
+      }
     } on ApiException catch (error) {
       _snack(error.message);
     } catch (error) {
@@ -234,286 +207,144 @@ class _PdfToolsPageState extends State<PdfToolsPage> {
     }
   }
 
-  bool _needsSelection(_PdfOp op) => op != _PdfOp.scanToPdf;
-
-  Future<void> _executeOp(
+  Future<void> _executeOperation(
     ResearchLifeController controller,
-    _PdfOp op,
-    List<CloudFileEntry> selected,
+    _PdfOp operation,
   ) async {
     final api = controller.pdfOperationApi;
     Map<String, dynamic>? params;
     File? signature;
-    final selectedLocal = _selectedLocal(controller);
-    final sourceEntry = selected.isEmpty ? null : selected.first;
-    final sourceDoc = selectedLocal ?? _placeholderDoc(sourceEntry!);
 
-    switch (op) {
+    switch (operation) {
       case _PdfOp.split:
       case _PdfOp.deletePages:
       case _PdfOp.extractPages:
         final pages = await promptPages(context);
-        if (pages == null || pages.isEmpty) {
-          return;
-        }
+        if (pages == null || pages.isEmpty) return;
         params = {'pages': pages};
-        break;
       case _PdfOp.rotate:
-        final deg = await promptText(
+        final degrees = await promptText(
           context,
           title: '旋转',
           label: '角度 90/180/270',
           initial: '90',
         );
-        if (deg == null) {
-          return;
-        }
-        params = {'degrees': int.tryParse(deg) ?? 90};
-        break;
+        if (degrees == null) return;
+        params = {'degrees': int.tryParse(degrees) ?? 90};
       case _PdfOp.reorder:
         final order = await promptPages(context, hint: '新顺序，如 3,1,2');
-        if (order == null) {
-          return;
-        }
+        if (order == null) return;
         params = {'order': order};
-        break;
       case _PdfOp.watermark:
-        final text = await promptText(
-          context,
-          title: '水印',
-          label: '水印文字',
-          initial: 'CONFIDENTIAL',
-        );
-        if (text == null) {
-          return;
-        }
+        final text = await promptText(context, title: '水印', label: '水印文字');
+        if (text == null) return;
         params = {'text': text};
-        break;
       case _PdfOp.encrypt:
-        final pwd = await promptText(
+        final password = await promptText(
           context,
           title: '加密',
           label: '密码',
           obscure: true,
         );
-        if (pwd == null || pwd.isEmpty) {
-          return;
-        }
-        params = {'password': pwd};
-        break;
+        if (password == null || password.isEmpty) return;
+        params = {'password': password};
       case _PdfOp.decrypt:
-        final pwd = await promptText(context, title: '解密', label: '密码（无密码可留空）');
-        params = {'password': pwd ?? ''};
-        break;
+        final password = await promptText(
+          context,
+          title: '解密',
+          label: '密码（无密码可留空）',
+        );
+        params = {'password': password ?? ''};
       case _PdfOp.redact:
         final keyword = await promptText(context, title: '遮盖', label: '关键词');
-        if (keyword == null) {
-          return;
-        }
+        if (keyword == null) return;
         params = {'keyword': keyword};
-        break;
       case _PdfOp.sign:
         const group = XTypeGroup(
           label: '图片',
           extensions: ['png', 'jpg', 'jpeg'],
         );
         final picked = await openFile(acceptedTypeGroups: [group]);
-        if (picked == null) {
-          return;
-        }
+        if (picked == null) return;
         signature = File(picked.path);
-        break;
-      case _PdfOp.aiChat:
-        final prompt = await promptText(
-          context,
-          title: '与 PDF 对话',
-          label: '你的问题',
-        );
-        if (prompt == null) {
-          return;
-        }
-        final cacheFile = selectedLocal == null
-            ? await controller.ensureCloudEntryFile(sourceEntry!)
-            : File(selectedLocal.path);
-        final ai = await api.ai(
-          operation: 'AI_CHAT',
-          localFile: cacheFile,
-          fileEntryId: sourceEntry?.serverId,
-          prompt: prompt,
-        );
-        if (!mounted) {
-          return;
-        }
-        await showAiResultDialog(context, ai.resultText);
-        return;
-      case _PdfOp.aiSummary:
-      case _PdfOp.aiTranslate:
-      case _PdfOp.aiQuestions:
-        final cacheFile = selectedLocal == null
-            ? await controller.ensureCloudEntryFile(sourceEntry!)
-            : File(selectedLocal.path);
-        final ai = await api.ai(
-          operation: op.apiName,
-          localFile: cacheFile,
-          fileEntryId: sourceEntry?.serverId,
-        );
-        if (!mounted) {
-          return;
-        }
-        await showAiResultDialog(context, ai.resultText);
-        return;
       default:
         break;
     }
 
-    final localFiles = <File>[];
-    if (selectedLocal != null) {
-      final file = File(selectedLocal.path);
+    final localFiles = _selected.map((item) => File(item.path)).toList();
+    for (final file in localFiles) {
       if (!file.existsSync()) {
-        throw StateError('本地 PDF 文件不存在');
-      }
-      localFiles.add(file);
-    } else {
-      for (final entry in selected) {
-        localFiles.add(await controller.ensureCloudEntryFile(entry));
+        throw StateError('本地 PDF 文件不存在：${file.path}');
       }
     }
-
     final output = await api.process(
-      operation: op.apiName,
+      operation: operation.apiName,
       localFiles: localFiles,
-      fileEntryId: selected.length == 1 ? sourceEntry?.serverId : null,
       params: params,
       signatureImage: signature,
     );
-
-    if (!mounted) {
-      return;
-    }
-    final savePlan = await showPostProcessSaveSheet(
-      context,
-      fileName: output.fileName,
-      entries: controller.cloudFileEntries,
-    );
-    if (savePlan.choice == null) {
-      _snack('已处理完成（未保存）');
-      return;
-    }
-    final message = await controller.persistProcessedOutput(
-      output: output,
-      source: sourceDoc,
-      saveLocal:
-          savePlan.choice == ProcessSaveChoice.local ||
-          savePlan.choice == ProcessSaveChoice.both,
-      saveCloud:
-          savePlan.choice == ProcessSaveChoice.cloud ||
-          savePlan.choice == ProcessSaveChoice.both,
-      cloudParentId: savePlan.cloudParentId,
-    );
-    _snack(message ?? output.message);
-  }
-
-  PdfLibraryDocument _placeholderDoc(CloudFileEntry entry) {
-    final now = DateTime.now();
-    return PdfLibraryDocument(
-      id: 'cloud_${entry.serverId}',
-      title: entry.title,
-      path: '',
-      fileKind: WorkspaceFileKind.pdf,
-      createdAt: now,
-      updatedAt: now,
-      serverId: entry.serverId,
-      inReadingList: false,
-    );
+    await _saveOutput(output);
   }
 
   Future<void> _scanImagesToPdf(ResearchLifeController controller) async {
-    if (AuthScope.read(context).isGuest) {
-      _snack('请登录后使用扫描转 PDF');
-      return;
-    }
     const group = XTypeGroup(
       label: '图片',
       extensions: ['jpg', 'jpeg', 'png', 'bmp', 'webp'],
     );
     final files = await openFiles(acceptedTypeGroups: [group]);
-    if (files.isEmpty) {
+    if (files.isEmpty || !mounted) {
       return;
     }
-    setState(() => _busy = true);
-    try {
-      final output = await controller.pdfOperationApi.process(
-        operation: 'IMAGES_TO_PDF',
-        localFiles: files.map((f) => File(f.path)).toList(),
-      );
-      final now = DateTime.now();
-      final placeholder = PdfLibraryDocument(
-        id: 'tmp',
-        title: 'scanned',
-        path: files.first.path,
-        createdAt: now,
-        updatedAt: now,
-      );
-      if (!mounted) {
-        return;
-      }
-      final savePlan = await showPostProcessSaveSheet(
-        context,
-        fileName: output.fileName,
-        entries: controller.cloudFileEntries,
-      );
-      if (savePlan.choice == null) {
-        return;
-      }
-      await controller.persistProcessedOutput(
-        output: output,
-        source: placeholder,
-        category: '扫描',
-        saveLocal:
-            savePlan.choice == ProcessSaveChoice.local ||
-            savePlan.choice == ProcessSaveChoice.both,
-        saveCloud:
-            savePlan.choice == ProcessSaveChoice.cloud ||
-            savePlan.choice == ProcessSaveChoice.both,
-        cloudParentId: savePlan.cloudParentId,
-      );
-      _snack('扫描 PDF 已保存');
-    } finally {
-      if (mounted) {
-        setState(() => _busy = false);
-      }
-    }
+    final output = await controller.pdfOperationApi.process(
+      operation: 'IMAGES_TO_PDF',
+      localFiles: files.map((file) => File(file.path)).toList(),
+    );
+    await _saveOutput(output);
   }
 
-  void _snack(String msg) {
-    if (!mounted) {
+  Future<void> _saveOutput(PdfProcessOutput output) async {
+    final directoryPath = await getDirectoryPath(confirmButtonText: '选择保存文件夹');
+    if (directoryPath == null) {
+      _snack('已取消保存');
       return;
     }
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+    final target = await writePdfOutputCollisionSafe(
+      directory: Directory(directoryPath),
+      preferredFileName: output.fileName,
+      bytes: output.bytes,
+    );
+    _snack('已保存到 ${target.path}');
+  }
+
+  String _fileStem(String path) {
+    final name = path.split(RegExp(r'[/\\]')).last;
+    final dot = name.lastIndexOf('.');
+    return dot > 0 ? name.substring(0, dot) : name;
+  }
+
+  void _snack(String message) {
+    if (mounted) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
+    }
   }
 }
 
 class _SelectedPdfSourceBar extends StatelessWidget {
-  const _SelectedPdfSourceBar({
-    required this.localDocument,
-    required this.cloudEntries,
-    required this.onClear,
-  });
+  const _SelectedPdfSourceBar({required this.documents, required this.onClear});
 
-  final PdfLibraryDocument? localDocument;
-  final List<CloudFileEntry> cloudEntries;
+  final List<PdfLibraryDocument> documents;
   final VoidCallback? onClear;
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final text = switch ((localDocument, cloudEntries.length)) {
-      (final doc?, _) => '已选本地 PDF：${doc.title}',
-      (_, 0) => '尚未选择 PDF',
-      (_, 1) => '已选云端 PDF：${cloudEntries.first.title}',
-      (_, final count) => '已选 $count 个云端 PDF',
+    final text = switch (documents.length) {
+      0 => '尚未选择 PDF',
+      1 => '已选：${documents.single.title}',
+      final count => '已选 $count 个本地 PDF',
     };
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: tokens.panelSubtle,
@@ -525,22 +356,13 @@ class _SelectedPdfSourceBar extends StatelessWidget {
         child: Row(
           children: [
             Icon(
-              localDocument == null
-                  ? Icons.cloud_outlined
-                  : Icons.picture_as_pdf_rounded,
+              Icons.picture_as_pdf_rounded,
               size: 18,
               color: tokens.textSecondary,
             ),
             const SizedBox(width: 8),
             Expanded(
-              child: Text(
-                text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
-              ),
+              child: Text(text, maxLines: 1, overflow: TextOverflow.ellipsis),
             ),
             IconButton(
               tooltip: '清除选择',
@@ -575,10 +397,6 @@ enum _PdfOp {
   toJpg('TO_JPG'),
   sign('SIGN'),
   redact('REDACT'),
-  aiChat('AI_CHAT'),
-  aiSummary('AI_SUMMARY'),
-  aiTranslate('AI_TRANSLATE'),
-  aiQuestions('AI_QUESTIONS'),
   scanToPdf('IMAGES_TO_PDF'),
   openReader('OPEN');
 
@@ -622,12 +440,6 @@ class _OperationBoard extends StatelessWidget {
         _Tile('转 PPT 大纲', Icons.slideshow, _PdfOp.toPpt),
         _Tile('转 JPG', Icons.image, _PdfOp.toJpg),
       ]),
-      _Section('AI PDF', [
-        _Tile('AI 对话', Icons.chat, _PdfOp.aiChat),
-        _Tile('AI 摘要', Icons.summarize, _PdfOp.aiSummary),
-        _Tile('翻译', Icons.translate, _PdfOp.aiTranslate),
-        _Tile('AI 出题', Icons.quiz, _PdfOp.aiQuestions),
-      ]),
       _Section('签名 / 安全', [
         _Tile('电子签名', Icons.draw, _PdfOp.sign),
         _Tile('加密', Icons.lock, _PdfOp.encrypt),
@@ -653,10 +465,10 @@ class _Section {
 }
 
 class _Tile {
-  const _Tile(this.label, this.icon, this.op);
+  const _Tile(this.label, this.icon, this.operation);
   final String label;
   final IconData icon;
-  final _PdfOp op;
+  final _PdfOp operation;
 }
 
 class _SectionCard extends StatelessWidget {
@@ -696,7 +508,7 @@ class _SectionCard extends StatelessWidget {
                 Padding(
                   padding: const EdgeInsets.only(bottom: 4),
                   child: TextButton.icon(
-                    onPressed: enabled ? () => onTap(tile.op) : null,
+                    onPressed: enabled ? () => onTap(tile.operation) : null,
                     icon: Icon(tile.icon, size: 18),
                     label: Text(tile.label),
                     style: TextButton.styleFrom(

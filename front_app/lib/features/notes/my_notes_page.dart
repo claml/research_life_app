@@ -29,7 +29,6 @@ class _MyNotesPageState extends State<MyNotesPage> {
     final controller = ResearchLifeScope.of(context);
     setState(() => _refreshing = true);
     await controller.ensurePdfLibraryLoaded();
-    await controller.refreshCloudUserNotes();
     if (mounted) {
       setState(() => _refreshing = false);
     }

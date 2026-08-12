@@ -2,16 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import '../../app/auth_scope.dart';
 import '../../app/research_life_scope.dart';
 import '../../core/models/app_models.dart';
 import '../../state/research_life_controller.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../core/utils/workspace_file_kind.dart';
-import '../../features/files/workspace_cloud_picker.dart';
 import '../../services/document/document_text_loader.dart';
 
-/// 文档查阅：直连云端或本机缓存，文本 / PPT / docx。
+/// 文档查阅：读取已导入本机文件库的文本 / PPT / docx 等文档。
 class DocumentViewerPage extends StatefulWidget {
   const DocumentViewerPage({super.key});
 
@@ -20,8 +18,6 @@ class DocumentViewerPage extends StatefulWidget {
 }
 
 class _DocumentViewerPageState extends State<DocumentViewerPage> {
-  final Set<int> _selectedCloudIds = {};
-  CloudFileEntry? _activeCloud;
   PdfLibraryDocument? _activeLocal;
   String? _content;
   bool _loading = false;
@@ -65,14 +61,6 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
     if (request == null) {
       return;
     }
-    if (request.cloudServerId != null) {
-      final entry = controller.cloudFileEntryByServerId(request.cloudServerId!);
-      if (entry != null) {
-        setState(() => _selectedCloudIds.add(entry.serverId));
-        await _openCloud(entry);
-      }
-      return;
-    }
     if (request.documentId != null) {
       final doc = controller.pdfDocumentById(request.documentId!);
       if (doc != null && doc.fileKind.isViewable) {
@@ -84,7 +72,6 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
   @override
   Widget build(BuildContext context) {
     final controller = ResearchLifeScope.read(context);
-    final auth = AuthScope.read(context);
     final tokens = context.tokens;
     final localDocs = controller.localViewableDocuments;
 
@@ -101,49 +88,23 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            '可直接从云端选择文本、Markdown、CSV、docx、PPT 等查阅，无需先导入本地。',
+            '查阅已导入本机的文本、Markdown、CSV、docx、PPT 等文档。',
             style: Theme.of(
               context,
             ).textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
           ),
           const SizedBox(height: 12),
-          WorkspaceCloudPicker(
-            filter: WorkspaceCloudFilter.viewableOnly,
-            selectedServerIds: _selectedCloudIds,
-            onSelectionChanged: (ids) {
-              setState(
-                () => _selectedCloudIds
-                  ..clear()
-                  ..addAll(ids),
-              );
-              if (ids.length == 1) {
-                final entry = controller.cloudFileEntryByServerId(ids.first);
-                if (entry != null) {
-                  unawaited(_openCloud(entry));
-                }
-              }
-            },
+          _LocalDocumentPicker(
+            documents: localDocs,
+            selectedDocumentId: _activeLocal?.id,
+            onSelected: _openLocal,
           ),
-          if (!auth.isGuest) ...[
-            const SizedBox(height: 8),
-            Align(
-              alignment: Alignment.centerRight,
-              child: Text(
-                '本机已缓存 ${_localCount(localDocs)} 个可查阅文件',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodySmall?.copyWith(color: tokens.textMuted),
-              ),
-            ),
-          ],
           const SizedBox(height: 12),
           Expanded(child: _buildPreview(context, tokens)),
         ],
       ),
     );
   }
-
-  int _localCount(List<PdfLibraryDocument> docs) => docs.length;
 
   Widget _buildPreview(BuildContext context, AppTokens tokens) {
     if (_loading) {
@@ -152,11 +113,11 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
     if (_error != null) {
       return Center(child: Text(_error!));
     }
-    final title = _activeCloud?.title ?? _activeLocal?.title;
+    final title = _activeLocal?.title;
     if (title == null) {
       return Center(
         child: Text(
-          '从上方云端列表选择文件，或从「我的文件」打开',
+          '从上方选择本机文档，或先到「我的文件」导入。',
           style: Theme.of(
             context,
           ).textTheme.bodyLarge?.copyWith(color: tokens.textMuted),
@@ -207,40 +168,9 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
     );
   }
 
-  Future<void> _openCloud(CloudFileEntry entry) async {
-    setState(() {
-      _activeCloud = entry;
-      _activeLocal = null;
-      _loading = true;
-      _error = null;
-      _content = null;
-    });
-    try {
-      final controller = ResearchLifeScope.read(context);
-      final file = await controller.ensureCloudEntryFile(entry);
-      final text = await DocumentTextLoader.loadFromPath(file.path);
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _content = text;
-        _loading = false;
-      });
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      setState(() {
-        _error = '$error';
-        _loading = false;
-      });
-    }
-  }
-
   Future<void> _openLocal(PdfLibraryDocument doc) async {
     setState(() {
       _activeLocal = doc;
-      _activeCloud = null;
       _loading = true;
       _error = null;
       _content = null;
@@ -263,5 +193,76 @@ class _DocumentViewerPageState extends State<DocumentViewerPage> {
         _loading = false;
       });
     }
+  }
+}
+
+class _LocalDocumentPicker extends StatelessWidget {
+  const _LocalDocumentPicker({
+    required this.documents,
+    required this.selectedDocumentId,
+    required this.onSelected,
+  });
+
+  final List<PdfLibraryDocument> documents;
+  final String? selectedDocumentId;
+  final ValueChanged<PdfLibraryDocument> onSelected;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    if (documents.isEmpty) {
+      return DecoratedBox(
+        decoration: BoxDecoration(
+          color: tokens.panelSurface,
+          borderRadius: BorderRadius.circular(tokens.radiusMedium),
+          border: Border.all(color: tokens.borderFaint),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: [
+              const Icon(Icons.folder_open_rounded),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  '还没有可查阅文档，请先在「我的文件」导入。',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return DropdownButtonFormField<String>(
+      key: ValueKey(selectedDocumentId),
+      initialValue: documents.any((item) => item.id == selectedDocumentId)
+          ? selectedDocumentId
+          : null,
+      decoration: InputDecoration(
+        labelText: '本机文档（${documents.length}）',
+        prefixIcon: const Icon(Icons.description_outlined),
+        border: const OutlineInputBorder(),
+      ),
+      hint: const Text('选择一份文档'),
+      items: [
+        for (final document in documents)
+          DropdownMenuItem(value: document.id, child: Text(document.title)),
+      ],
+      onChanged: (id) {
+        if (id == null) {
+          return;
+        }
+        for (final document in documents) {
+          if (document.id == id) {
+            onSelected(document);
+            return;
+          }
+        }
+      },
+    );
   }
 }

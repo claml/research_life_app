@@ -7,16 +7,12 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:pdfrx/pdfrx.dart';
 
-import '../../app/auth_scope.dart';
 import '../../app/research_life_scope.dart';
 import '../../core/models/app_models.dart';
 import '../../core/theme/app_tokens.dart';
-import '../../core/utils/workspace_file_kind.dart';
 import '../../state/research_life_controller.dart';
 import '../../shared/widgets/empty_state.dart';
-import '../files/cloud_file_explorer.dart';
 import 'reading_note_dialog.dart';
-import 'reading_save_dialog.dart';
 
 /// PDF 全文搜索匹配高亮色（半透明黄 / 当前匹配橙）。
 /// PDF 页面本身是白底，与主题无关。
@@ -40,7 +36,6 @@ class _ReadingPageState extends State<ReadingPage> {
   String _selectedCategory = _categoryOptions.first;
   bool _dragging = false;
   int _readerRefreshTick = 0;
-  bool _cloudPickerExpanded = true;
   ResearchLifeController? _controller;
 
   @override
@@ -75,11 +70,6 @@ class _ReadingPageState extends State<ReadingPage> {
   }
 
   Future<void> _bootstrapReadingPage() async {
-    final controller = ResearchLifeScope.of(context);
-    final auth = AuthScope.of(context);
-    if (auth.cloudSyncEnabled) {
-      await controller.refreshCloudFiles(reconcile: false);
-    }
     await _consumeReadingOpenRequest();
   }
 
@@ -116,12 +106,6 @@ class _ReadingPageState extends State<ReadingPage> {
       }
       return;
     }
-    if (request.cloudServerId != null) {
-      final entry = controller.cloudFileEntryByServerId(request.cloudServerId!);
-      if (entry != null) {
-        await _openCloudEntry(entry);
-      }
-    }
   }
 
   @override
@@ -133,9 +117,6 @@ class _ReadingPageState extends State<ReadingPage> {
       builder: (context, _) {
         final documents = controller.pdfReadingDocuments;
         final selectedDocument = _selectedDocument(documents);
-
-        final auth = AuthScope.read(context);
-        final tokens = context.tokens;
 
         return Padding(
           padding: const EdgeInsets.all(28),
@@ -150,77 +131,6 @@ class _ReadingPageState extends State<ReadingPage> {
                     setState(() => _selectedCategory = category),
                 onImport: () => _pickPdf(context, controller),
               ),
-              if (auth.cloudSyncEnabled) ...[
-                const SizedBox(height: 12),
-                Material(
-                  color: tokens.panelSurface,
-                  borderRadius: BorderRadius.circular(tokens.radiusMedium),
-                  child: InkWell(
-                    borderRadius: BorderRadius.circular(tokens.radiusMedium),
-                    onTap: () => setState(
-                      () => _cloudPickerExpanded = !_cloudPickerExpanded,
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 14,
-                        vertical: 10,
-                      ),
-                      child: Row(
-                        children: [
-                          Icon(
-                            _cloudPickerExpanded
-                                ? Icons.folder_open_rounded
-                                : Icons.folder_rounded,
-                            size: 20,
-                          ),
-                          const SizedBox(width: 8),
-                          Text(
-                            '云端文献库',
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(fontWeight: FontWeight.w600),
-                          ),
-                          const Spacer(),
-                          Icon(
-                            _cloudPickerExpanded
-                                ? Icons.expand_less_rounded
-                                : Icons.expand_more_rounded,
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                if (_cloudPickerExpanded) ...[
-                  const SizedBox(height: 8),
-                  SizedBox(
-                    height: selectedDocument == null ? 280 : 220,
-                    child: DecoratedBox(
-                      decoration: BoxDecoration(
-                        color: tokens.panelSurface,
-                        borderRadius: BorderRadius.circular(
-                          tokens.radiusMedium,
-                        ),
-                        border: Border.all(color: tokens.borderFaint),
-                      ),
-                      child: Padding(
-                        padding: const EdgeInsets.all(10),
-                        child: CloudFileExplorer(
-                          compact: true,
-                          entries: controller.cloudFileEntries,
-                          busy: controller.cloudFilesBusy,
-                          controller: controller,
-                          mode: CloudFileExplorerMode.readingPicker,
-                          fileFilter: (entry) =>
-                              WorkspaceFileKind.fromPath(entry.title).isPdf,
-                          onOpenFile: _openCloudEntry,
-                          onSaveAs: (entry) =>
-                              _saveCloudEntryAs(context, controller, entry),
-                        ),
-                      ),
-                    ),
-                  ),
-                ],
-              ],
               const SizedBox(height: 16),
               Expanded(
                 child: selectedDocument == null
@@ -434,107 +344,15 @@ class _ReadingPageState extends State<ReadingPage> {
     _showMessage(context, message);
   }
 
-  Future<void> _saveCloudEntryAs(
-    BuildContext context,
-    ResearchLifeController controller,
-    CloudFileEntry entry,
-  ) async {
-    final doc = await controller.prepareCloudFileForReading(entry);
-    if (doc == null || !context.mounted) {
-      return;
-    }
-    await _showReadingSaveDialog(context, controller, doc);
-  }
-
-  Future<void> _openCloudEntry(CloudFileEntry entry) async {
-    final controller = ResearchLifeScope.of(context);
-    try {
-      final document = await controller.prepareCloudFileForReading(entry);
-      if (!mounted || document == null) {
-        return;
-      }
-      setState(() => _selectedDocumentId = document.id);
-      _showMessage(context, '已从云端打开《${document.title}》');
-    } catch (error) {
-      if (mounted) {
-        _showMessage(context, '打开失败：$error');
-      }
-    }
-  }
-
   Future<void> _saveReadingSession(
     BuildContext context,
     ResearchLifeController controller,
     PdfLibraryDocument document,
   ) async {
-    final auth = AuthScope.of(context);
-    if (!auth.cloudSyncEnabled) {
-      await _showReadingSaveDialog(context, controller, document);
-      return;
-    }
-
-    final documentId = document.id;
-    final message = await controller.saveDocumentToCloud(documentId);
-    if (!context.mounted) {
-      return;
-    }
-
-    if (message != null) {
-      _showMessage(context, message);
-      return;
-    }
-
-    setState(() => _readerRefreshTick++);
-    _showMessage(context, '已保存到云端');
-  }
-
-  Future<void> _showReadingSaveDialog(
-    BuildContext context,
-    ResearchLifeController controller,
-    PdfLibraryDocument document,
-  ) async {
-    final auth = AuthScope.of(context);
-    final result = await showReadingSaveDialog(
-      context,
-      currentTitle: document.title,
-      cloudSyncEnabled: auth.cloudSyncEnabled,
-    );
-    if (!context.mounted || result == null) {
-      return;
-    }
-    switch (result) {
-      case ReadingCloseResult():
-        setState(() => _selectedDocumentId = null);
-      case ReadingSaveLocalResult():
-        await controller.waitForPendingPdfPersistence();
-        if (document.cloudOnly && document.serverId != null) {
-          final entry = controller.cloudFileEntryByServerId(document.serverId!);
-          if (entry != null) {
-            await controller.moveCloudEntryToLocal(entry);
-          }
-        }
-        if (context.mounted) {
-          setState(() => _readerRefreshTick++);
-          _showMessage(context, '已保存到本机');
-        }
-      case ReadingSaveCloudResult(
-        overwrite: final overwrite,
-        newTitle: final newTitle,
-      ):
-        final docId = document.id;
-        final message = await controller.saveDocumentToCloud(
-          docId,
-          newTitle: overwrite ? null : newTitle,
-        );
-        if (!context.mounted) {
-          return;
-        }
-        if (message != null) {
-          _showMessage(context, message);
-          return;
-        }
-        setState(() => _readerRefreshTick++);
-        _showMessage(context, '已保存到云端');
+    await controller.waitForPendingPdfPersistence();
+    if (context.mounted) {
+      setState(() => _readerRefreshTick++);
+      _showMessage(context, '已保存到本机');
     }
   }
 
@@ -608,7 +426,7 @@ class _ReadingHeader extends StatelessWidget {
               Text('科研文献', style: Theme.of(context).textTheme.headlineMedium),
               const SizedBox(height: 8),
               Text(
-                '阅读 PDF、高亮批注；点工具栏「保存」将批注同步到云端',
+                '阅读 PDF、高亮批注；内容自动保存在本机。',
                 style: Theme.of(
                   context,
                 ).textTheme.bodyLarge?.copyWith(color: tokens.textSecondary),
@@ -2169,8 +1987,8 @@ class _ReaderToolbar extends StatelessWidget {
           ),
           if (onSaveReading != null)
             _ToolbarIconButton(
-              tooltip: '保存到云端',
-              icon: Icons.cloud_upload_outlined,
+              tooltip: '保存到本机',
+              icon: Icons.save_outlined,
               onPressed: onSaveReading,
             ),
           if (onCloseReading != null)
@@ -2885,20 +2703,6 @@ class _AnnotationListState extends State<_AnnotationList> {
       clearLatex: draft.latexContent == null,
     );
     widget.onAnnotationsChanged();
-
-    final auth = AuthScope.of(context);
-    if (auth.cloudSyncEnabled) {
-      final cloudMessage = await widget.controller.saveDocumentToCloud(
-        widget.document.id,
-      );
-      widget.onAnnotationsChanged();
-      if (mounted && cloudMessage != null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text(cloudMessage)));
-        return;
-      }
-    }
 
     if (mounted) {
       ScaffoldMessenger.of(

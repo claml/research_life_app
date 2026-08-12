@@ -204,7 +204,7 @@ class _ReadingNoteDialogState extends State<_ReadingNoteDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('取消'),
         ),
-        FilledButton(onPressed: _submit, child: const Text('保存到云端')),
+        FilledButton(onPressed: _submit, child: const Text('保存到本机')),
       ],
     );
   }
