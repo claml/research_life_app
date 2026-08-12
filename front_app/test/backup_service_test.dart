@@ -2,11 +2,16 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:crypto/crypto.dart';
+import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:path/path.dart' as p;
+import 'package:research_life/services/agent/ai_credential_store.dart';
 import 'package:research_life/services/database/app_database.dart';
+import 'package:research_life/services/database/database_connection.dart';
+import 'package:research_life/services/database/repositories/agent_chat_repository.dart';
 import 'package:research_life/services/storage/backup_manifest.dart';
 import 'package:research_life/services/storage/backup_service.dart';
+import 'package:research_life/services/storage/local_data_operation_coordinator.dart';
 import 'package:research_life/services/storage/local_workspace_service.dart';
 import 'package:research_life/services/storage/workspace_manifest_service.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -254,6 +259,103 @@ void main() {
       expect(legacyPreferences, isNot(contains('agent-secret')));
       expect(legacyPreferences, isNot(contains('analysis-secret')));
       expect(legacyPreferences, isNot(contains('weather-secret')));
+    });
+
+    test('backup restores chat history without AI credential bytes', () async {
+      const secret = 'agent-secret-never-in-backup';
+      final fixture = await _BackupFixture.create();
+      addTearDown(fixture.dispose);
+      final credentialStore = _MemoryAiCredentialStore();
+      await credentialStore.write('primary', secret);
+
+      final sourceDatabase = AppDatabase(
+        openDatabaseConnection(fixture.workspaceService),
+      );
+      final sourceChats = AgentChatRepository(
+        sourceDatabase,
+        operationCoordinator: LocalDataOperationCoordinator(),
+      );
+      final session = await sourceChats.createSession(
+        profileId: 'primary',
+        model: 'model-a',
+        title: '科研问答',
+      );
+      await sourceChats.appendMessage(
+        sessionId: session.id,
+        role: 'user',
+        content: '问题',
+      );
+      await sourceChats.appendMessage(
+        sessionId: session.id,
+        role: 'assistant',
+        content: '回答',
+        model: 'model-a',
+      );
+      await sourceDatabase.close();
+
+      final result = await fixture.service.createBackup();
+      final backupDatabaseFile = File(
+        p.join(result.directory.path, 'research_life.sqlite'),
+      );
+      final backupDatabaseBytes = await backupDatabaseFile.readAsBytes();
+      final backupPreferencesBytes = await File(
+        p.join(result.directory.path, 'preferences.json'),
+      ).readAsBytes();
+      final backupManifestBytes = await File(
+        p.join(result.directory.path, 'backup_manifest.json'),
+      ).readAsBytes();
+
+      for (final bytes in <List<int>>[
+        backupDatabaseBytes,
+        backupPreferencesBytes,
+        backupManifestBytes,
+      ]) {
+        expect(
+          latin1.decode(bytes, allowInvalid: true),
+          isNot(contains(secret)),
+        );
+      }
+
+      final backupDatabase = AppDatabase(NativeDatabase(backupDatabaseFile));
+      final backupChats = AgentChatRepository(
+        backupDatabase,
+        operationCoordinator: LocalDataOperationCoordinator(),
+      );
+      expect((await backupChats.listSessions()).single.title, '科研问答');
+      expect(
+        (await backupChats.listMessages(
+          session.id,
+        )).map((message) => message.content),
+        <String>['问题', '回答'],
+      );
+      await backupDatabase.close();
+
+      final changedDatabase = AppDatabase(
+        openDatabaseConnection(fixture.workspaceService),
+      );
+      final changedChats = AgentChatRepository(
+        changedDatabase,
+        operationCoordinator: LocalDataOperationCoordinator(),
+      );
+      await changedChats.deleteSession(session.id);
+      await changedDatabase.close();
+
+      await fixture.service.restoreBackup(result.directory);
+      final restoredDatabase = AppDatabase(
+        openDatabaseConnection(fixture.workspaceService),
+      );
+      final restoredChats = AgentChatRepository(
+        restoredDatabase,
+        operationCoordinator: LocalDataOperationCoordinator(),
+      );
+      expect(
+        (await restoredChats.listMessages(
+          session.id,
+        )).map((message) => message.content),
+        <String>['问题', '回答'],
+      );
+      await restoredDatabase.close();
+      expect(await credentialStore.read('primary'), secret);
     });
 
     test(
@@ -1069,4 +1171,24 @@ String _readDatabaseValue(File databaseFile) {
 Future<String> _sha256(File file) async {
   final digest = await sha256.bind(file.openRead()).first;
   return digest.toString();
+}
+
+final class _MemoryAiCredentialStore implements AiCredentialStore {
+  final Map<String, String> _values = <String, String>{};
+
+  @override
+  Future<void> delete(String profileId) async {
+    _values.remove(profileId);
+  }
+
+  @override
+  Future<bool> has(String profileId) async => _values.containsKey(profileId);
+
+  @override
+  Future<String?> read(String profileId) async => _values[profileId];
+
+  @override
+  Future<void> write(String profileId, String secret) async {
+    _values[profileId] = secret;
+  }
 }
