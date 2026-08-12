@@ -1184,7 +1184,9 @@ TITLE: 测试大学 2026 学年校历
       await firstController.saveGlassSettings(settings);
 
       final stored = await preferencesRepository.loadGlassSettings();
-      expect(stored, isNotNull);
+      if (stored == null) {
+        fail('Expected persisted glass settings.');
+      }
       expect(jsonDecode(stored)['blurSigma'], 20);
       expect(jsonDecode(stored)['noiseEnabled'], isFalse);
 
