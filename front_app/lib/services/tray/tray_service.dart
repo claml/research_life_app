@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/services.dart' show rootBundle;
@@ -8,11 +9,19 @@ import '../../state/research_life_controller.dart';
 import '../utility/privacy_screen.dart';
 
 /// 系统托盘常驻：关闭窗口时最小化到托盘，后台任务继续运行。
-class TrayService {
-  TrayService({required ResearchLifeController controller})
-    : _controller = controller;
+class TrayService extends TrayListener {
+  TrayService({
+    required ResearchLifeController controller,
+    required Future<void> Function() requestExit,
+    Future<void> Function()? showContextMenu,
+  }) : _controller = controller,
+       _requestExit = requestExit,
+       _showContextMenu = showContextMenu ?? trayManager.popUpContextMenu;
 
   final ResearchLifeController _controller;
+  final Future<void> Function() _requestExit;
+  final Future<void> Function() _showContextMenu;
+  Future<void>? _exitFuture;
   bool _ready = false;
 
   Future<void> initialize() async {
@@ -42,14 +51,16 @@ class TrayService {
         ],
       ),
     );
-    trayManager.addListener(_TrayEventListener(this));
+    trayManager.addListener(this);
 
-    // 拦截窗口关闭：按设置决定最小化到托盘或真正退出。
     await windowManager.ensureInitialized();
-    await windowManager.setPreventClose(true);
-    windowManager.addListener(_WindowCloseListener(this));
 
     _ready = true;
+  }
+
+  Future<void> dispose() async {
+    trayManager.removeListener(this);
+    _ready = false;
   }
 
   Future<void> showMainWindow() async {
@@ -59,37 +70,54 @@ class TrayService {
     _controller.notifyUserActivity();
   }
 
-  Future<void> quit() async {
-    await windowManager.destroy();
+  Future<void> quit() {
+    return _exitFuture ??= _requestExit();
+  }
+
+  Future<void> showContextMenu() => _showContextMenu();
+
+  Future<void> handleWindowClose() async {
+    if (await handleWindowCloseRequest()) {
+      return;
+    }
+    await quit();
+  }
+
+  /// Returns true when the request was handled by hiding the window.
+  Future<bool> handleWindowCloseRequest() async {
+    if (!closeToTray) {
+      return false;
+    }
+    await windowManager.hide();
+    return true;
   }
 
   bool get closeToTray => _controller.closeToTray;
-}
-
-class _TrayEventListener extends TrayListener {
-  _TrayEventListener(this._service);
-
-  final TrayService _service;
 
   @override
   void onTrayIconMouseDown() {
     // 单击托盘图标：显示主窗口。
-    _service.showMainWindow();
+    unawaited(showMainWindow());
   }
 
   @override
   void onTrayIconMouseUp() {
-    _service.showMainWindow();
+    unawaited(showMainWindow());
+  }
+
+  @override
+  void onTrayIconRightMouseDown() {
+    unawaited(showContextMenu());
   }
 
   @override
   void onTrayMenuItemClick(MenuItem menuItem) {
     switch (menuItem.key) {
       case 'show':
-        _service.showMainWindow();
+        unawaited(showMainWindow());
       case 'today_todo':
-        _service.showMainWindow();
-        _service._controller.requestTodayTodoDialog();
+        unawaited(showMainWindow());
+        _controller.requestTodayTodoDialog();
       case 'privacy_on':
         // 隐私屏模式：先匹配分辨率，再仅虚拟显示器输出。
         enterPrivacyScreen();
@@ -97,24 +125,7 @@ class _TrayEventListener extends TrayListener {
         // 恢复内置屏幕。
         setPrivacyScreen(enable: false);
       case 'quit':
-        _service.quit();
-    }
-  }
-}
-
-class _WindowCloseListener extends WindowListener {
-  _WindowCloseListener(this._service);
-
-  final TrayService _service;
-
-  @override
-  void onWindowClose() {
-    if (_service.closeToTray) {
-      // 最小化到托盘，后台继续运行。
-      windowManager.hide();
-    } else {
-      // 设置里关闭了托盘模式：真正退出。
-      windowManager.destroy();
+        unawaited(quit());
     }
   }
 }
