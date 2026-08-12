@@ -225,16 +225,16 @@ class _AgentTopBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              'AI 助手',
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(
-                context,
-              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-            ),
+          Text(
+            'AI 助手',
+            key: const Key('agent-title'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: Theme.of(
+              context,
+            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
           ),
+          SizedBox(width: narrow ? 12 : 24),
           if (profile != null)
             Flexible(
               child: Container(
@@ -314,7 +314,12 @@ class _HistoryRail extends StatelessWidget {
                         key: const Key('agent-expand-history'),
                         tooltip: '展开历史记录',
                         onPressed: onExpand,
-                        color: Colors.white70,
+                        style: IconButton.styleFrom(
+                          foregroundColor: Colors.white,
+                          backgroundColor: Colors.transparent,
+                          hoverColor: Colors.white.withValues(alpha: 0.1),
+                          highlightColor: Colors.transparent,
+                        ),
                         icon: const Icon(Icons.chevron_right_rounded),
                       ),
               ),

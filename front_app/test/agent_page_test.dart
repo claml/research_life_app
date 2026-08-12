@@ -374,6 +374,23 @@ void main() {
     expect(tester.getSize(find.byKey(const Key('agent-top-bar'))).height, 72);
     expect(find.byKey(const Key('agent-new-session')), findsOneWidget);
     expect(find.byKey(const Key('agent-collapse-history')), findsOneWidget);
+    final titleRect = tester.getRect(find.byKey(const Key('agent-title')));
+    final modelRect = tester.getRect(find.byKey(const Key('agent-model-chip')));
+    final settingsRect = tester.getRect(
+      find.byKey(const Key('agent-settings')),
+    );
+    expect(modelRect.left - titleRect.right, lessThanOrEqualTo(28));
+    expect(settingsRect.left - modelRect.right, lessThanOrEqualTo(12));
+
+    await tester.tap(find.byKey(const Key('agent-collapse-history')));
+    await tester.pumpAndSettle();
+    final expandButton = tester.widget<IconButton>(
+      find.byKey(const Key('agent-expand-history')),
+    );
+    final expandBackground = expandButton.style?.backgroundColor?.resolve({});
+    final expandForeground = expandButton.style?.foregroundColor?.resolve({});
+    expect(expandBackground?.a, lessThan(0.2));
+    expect(expandForeground, Colors.white);
     expect(tester.takeException(), isNull);
   });
 

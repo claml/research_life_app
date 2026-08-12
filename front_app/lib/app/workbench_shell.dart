@@ -660,6 +660,7 @@ class _SidebarNavButton extends StatelessWidget {
               highlightColor: Colors.transparent,
               splashColor: Colors.white.withValues(alpha: 0.1),
               child: AnimatedContainer(
+                key: selected ? const Key('sidebar-selected-surface') : null,
                 duration: AppLayout.quickMotion,
                 height: 48,
                 padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 14),
@@ -688,27 +689,31 @@ class _SidebarNavButton extends StatelessWidget {
                           ),
                         ),
                       ),
-                    Row(
-                      mainAxisAlignment: collapsed
-                          ? MainAxisAlignment.center
-                          : MainAxisAlignment.start,
-                      children: [
-                        if (!collapsed) const SizedBox(width: 8),
-                        Icon(icon, size: 20, color: Colors.white),
-                        if (!collapsed) ...[
-                          const SizedBox(width: 12),
-                          Text(
-                            label,
-                            style: Theme.of(context).textTheme.titleMedium
-                                ?.copyWith(
-                                  color: Colors.white,
-                                  fontWeight: selected
-                                      ? FontWeight.w600
-                                      : FontWeight.w500,
-                                ),
-                          ),
+                    Positioned.fill(
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.center,
+                        mainAxisAlignment: collapsed
+                            ? MainAxisAlignment.center
+                            : MainAxisAlignment.start,
+                        children: [
+                          if (!collapsed) const SizedBox(width: 8),
+                          Icon(icon, size: 20, color: Colors.white),
+                          if (!collapsed) ...[
+                            const SizedBox(width: 12),
+                            Text(
+                              label,
+                              style: Theme.of(context).textTheme.titleMedium
+                                  ?.copyWith(
+                                    color: Colors.white,
+                                    fontWeight: selected
+                                        ? FontWeight.w600
+                                        : FontWeight.w500,
+                                    height: 1,
+                                  ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ],
                 ),

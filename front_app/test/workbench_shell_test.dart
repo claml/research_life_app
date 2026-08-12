@@ -86,10 +86,16 @@ void main() {
 
     final indicator = find.byKey(const Key('sidebar-selected-indicator'));
     final selectedIcon = find.byIcon(Icons.today_outlined);
+    final selectedSurface = find.byKey(const Key('sidebar-selected-surface'));
     expect(indicator, findsOneWidget);
+    expect(selectedSurface, findsOneWidget);
     expect(
       tester.getCenter(indicator).dx,
       lessThan(tester.getCenter(selectedIcon).dx),
+    );
+    expect(
+      tester.getCenter(selectedIcon).dy,
+      closeTo(tester.getCenter(selectedSurface).dy, 0.5),
     );
   });
 }
