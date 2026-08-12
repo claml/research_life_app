@@ -80,7 +80,10 @@ class PdfDocumentsRepository {
             syncState: 'pending',
             updatedAt: DateTime.now(),
           );
-    await _localStore.saveDocument(stored);
+    await _localStore.saveDocument(
+      stored,
+      mergeMetadata: operation == 'metadata',
+    );
     await _enqueueFileChange(stored, operation);
   }
 
