@@ -107,28 +107,35 @@ void main() {
       expect(await expectedFiles[2].readAsString(), 'shm');
     });
 
-    test('copies imported pdfs into materials category folder', () async {
-      final tempDir = await Directory.systemTemp.createTemp(
-        'research_life_materials_test',
-      );
-      addTearDown(() => tempDir.delete(recursive: true));
+    test(
+      'copies imported pdfs into the backed-up managed payload folder',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'research_life_materials_test',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
 
-      final service = LocalWorkspaceService(
-        storageDirectoryResolver: () async => tempDir,
-      );
-      final source = File('${tempDir.path}${Platform.pathSeparator}source.pdf');
-      await source.writeAsString('pdf-content');
+        final service = LocalWorkspaceService(
+          storageDirectoryResolver: () async => tempDir,
+        );
+        final source = File(
+          '${tempDir.path}${Platform.pathSeparator}source.pdf',
+        );
+        await source.writeAsString('pdf-content');
 
-      final copied = await service.copyPdfIntoMaterials(source);
+        final copied = await service.copyPdfIntoMaterials(source);
 
-      expect(
-        copied.path,
-        '${tempDir.path}${Platform.pathSeparator}资料'
-        '${Platform.pathSeparator}未分类'
-        '${Platform.pathSeparator}source.pdf',
-      );
-      expect(await copied.readAsString(), 'pdf-content');
-    });
+        expect(
+          copied.path,
+          '${tempDir.path}${Platform.pathSeparator}.research_life'
+          '${Platform.pathSeparator}local_files'
+          '${Platform.pathSeparator}payloads'
+          '${Platform.pathSeparator}未分类'
+          '${Platform.pathSeparator}source.pdf',
+        );
+        expect(await copied.readAsString(), 'pdf-content');
+      },
+    );
 
     test('keeps distinct imported pdfs when names collide', () async {
       final tempDir = await Directory.systemTemp.createTemp(

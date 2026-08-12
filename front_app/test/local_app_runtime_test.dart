@@ -384,6 +384,8 @@ void main() {
     expect(appSource, isNot(contains('AuthGate(')));
     expect(appSource, contains('PinLockGate(child: WorkbenchShell())'));
     expect(appSource, isNot(contains("import 'app_shell.dart';")));
+    expect(File('lib/app/app_shell.dart').existsSync(), isFalse);
+    expect(File('lib/app/auth_gate.dart').existsSync(), isFalse);
   });
 
   test(

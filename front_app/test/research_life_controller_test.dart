@@ -104,31 +104,37 @@ void main() {
       expect(controller.calendarEvents.single.title, '下周二准备和导师开会确认论文框架');
     });
 
-    test('uses remote LLM coordinator path when enabled', () async {
+    test('keeps remote LLM disabled in local-only mode', () async {
       var remoteCalled = false;
       final controller = await _createController(
         analysisEngineCoordinator: AnalysisEngineCoordinator(
           ruleBasedAnalysisService: const AnalysisService(),
-          remoteLlmAnalyzer: (input, settings, {historyPersonText, clarificationAnswers}) async {
-            remoteCalled = true;
-            expect(settings.enableRemoteLlmAnalysis, isTrue);
-            return AnalysisDraft(
-              id: 'controller_llm_draft',
-              tasks: [
-                ExtractedTaskDraft(
-                  id: 'controller_llm_task',
-                  content: '完成论文整理',
-                  category: ItemCategory.work,
-                  type: EventType.record,
-                  confidence: 0.9,
-                ),
-              ],
-              persons: const [],
-              summary: '远程模型分析完成。',
-              warnings: const [],
-              createdAt: DateTime(2026, 5, 15),
-            );
-          },
+          remoteLlmAnalyzer:
+              (
+                input,
+                settings, {
+                historyPersonText,
+                clarificationAnswers,
+              }) async {
+                remoteCalled = true;
+                expect(settings.enableRemoteLlmAnalysis, isTrue);
+                return AnalysisDraft(
+                  id: 'controller_llm_draft',
+                  tasks: [
+                    ExtractedTaskDraft(
+                      id: 'controller_llm_task',
+                      content: '完成论文整理',
+                      category: ItemCategory.work,
+                      type: EventType.record,
+                      confidence: 0.9,
+                    ),
+                  ],
+                  persons: const [],
+                  summary: '远程模型分析完成。',
+                  warnings: const [],
+                  createdAt: DateTime(2026, 5, 15),
+                );
+              },
         ),
       );
       await controller.saveRemoteLlmAnalysisSettings(
@@ -138,9 +144,9 @@ void main() {
       controller.inputController.text = '这周完成论文整理。';
       await controller.analyzeCurrentInput();
 
-      expect(remoteCalled, isTrue);
-      expect(controller.currentDraft?.id, 'controller_llm_draft');
-      expect(controller.currentPreview?.summary, '远程模型分析完成。');
+      expect(remoteCalled, isFalse);
+      expect(controller.currentDraft?.id, isNot('controller_llm_draft'));
+      expect(controller.currentPreview?.summary, isNot('远程模型分析完成。'));
     });
 
     test('loads an existing weekly analysis upload for editing', () async {
@@ -800,69 +806,71 @@ TITLE: 测试大学 2026 学年校历
       },
     );
 
-    test('persists remote LLM analysis settings through preferences', () async {
-      final tempDir = await Directory.systemTemp.createTemp(
-        'research_life_controller_remote_llm_settings_test',
-      );
-      addTearDown(() => tempDir.delete(recursive: true));
-
-      final database = AppDatabase(NativeDatabase.memory());
-      addTearDown(database.close);
-      final preferencesRepository = PreferencesRepository(database);
-
-      ResearchLifeController createController() {
-        final controller = ResearchLifeController(
-          importService: const ImportService(),
-          analysisService: const AnalysisService(),
-          reviewService: const ReviewService(),
-          institutionCalendarService: const InstitutionCalendarService(),
-          localWorkspaceService: LocalWorkspaceService(
-            storageDirectoryResolver: () async => tempDir,
-          ),
-          preferencesRepository: preferencesRepository,
+    test(
+      'does not persist legacy remote LLM settings in local-only mode',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'research_life_controller_remote_llm_settings_test',
         );
-        addTearDown(controller.dispose);
-        return controller;
-      }
+        addTearDown(() => tempDir.delete(recursive: true));
 
-      final firstController = createController();
-      const settings = RemoteLlmAnalysisSettings(
-        enableRemoteLlmAnalysis: true,
-        remoteTimeoutSeconds: 90,
-        fallbackToRules: false,
-        strictJsonSchema: true,
-      );
+        final database = AppDatabase(NativeDatabase.memory());
+        addTearDown(database.close);
+        final preferencesRepository = PreferencesRepository(database);
 
-      final message = await firstController.saveRemoteLlmAnalysisSettings(
-        settings,
-      );
+        ResearchLifeController createController() {
+          final controller = ResearchLifeController(
+            importService: const ImportService(),
+            analysisService: const AnalysisService(),
+            reviewService: const ReviewService(),
+            institutionCalendarService: const InstitutionCalendarService(),
+            localWorkspaceService: LocalWorkspaceService(
+              storageDirectoryResolver: () async => tempDir,
+            ),
+            preferencesRepository: preferencesRepository,
+          );
+          addTearDown(controller.dispose);
+          return controller;
+        }
 
-      expect(message, '远程 LLM 周分析设置已保存。');
-      final stored = await preferencesRepository
-          .loadRemoteLlmAnalysisSettings();
-      expect(stored, isNotNull);
-      expect(jsonDecode(stored!)['remoteTimeoutSeconds'], 90);
+        final firstController = createController();
+        const settings = RemoteLlmAnalysisSettings(
+          enableRemoteLlmAnalysis: true,
+          remoteTimeoutSeconds: 90,
+          fallbackToRules: false,
+          strictJsonSchema: true,
+        );
 
-      final secondController = createController();
-      await secondController.ensureRemoteLlmAnalysisSettingsLoaded();
+        final message = await firstController.saveRemoteLlmAnalysisSettings(
+          settings,
+        );
 
-      expect(
-        secondController.remoteLlmAnalysisSettings.enableRemoteLlmAnalysis,
-        isTrue,
-      );
-      expect(
-        secondController.remoteLlmAnalysisSettings.remoteTimeoutSeconds,
-        90,
-      );
-      expect(
-        secondController.remoteLlmAnalysisSettings.fallbackToRules,
-        isFalse,
-      );
-      expect(
-        secondController.remoteLlmAnalysisSettings.strictJsonSchema,
-        isTrue,
-      );
-    });
+        expect(message, contains('Windows 安全凭据'));
+        final stored = await preferencesRepository
+            .loadRemoteLlmAnalysisSettings();
+        expect(stored, isNull);
+
+        final secondController = createController();
+        await secondController.ensureRemoteLlmAnalysisSettingsLoaded();
+
+        expect(
+          secondController.remoteLlmAnalysisSettings.enableRemoteLlmAnalysis,
+          isFalse,
+        );
+        expect(
+          secondController.remoteLlmAnalysisSettings.remoteTimeoutSeconds,
+          RemoteLlmAnalysisSettings.defaultRemoteTimeoutSeconds,
+        );
+        expect(
+          secondController.remoteLlmAnalysisSettings.fallbackToRules,
+          isTrue,
+        );
+        expect(
+          secondController.remoteLlmAnalysisSettings.strictJsonSchema,
+          isTrue,
+        );
+      },
+    );
 
     test('keeps existing home image when replacement copy fails', () async {
       final controller = await _createController();
@@ -916,7 +924,9 @@ TITLE: 测试大学 2026 学年校历
       await firstController.waitForPendingManualEventPersistence();
       expect(firstController.todoEvents, hasLength(1));
 
-      await firstController.toggleTodoDone(firstController.todoEvents.single.id);
+      await firstController.toggleTodoDone(
+        firstController.todoEvents.single.id,
+      );
       await firstController.waitForPendingTodoStatusPersistence();
       expect(firstController.todoEvents.single.isDone, isTrue);
       expect(firstController.todoEvents.single.completedAt, isNotNull);
@@ -1122,58 +1132,61 @@ TITLE: 测试大学 2026 学年校历
       expect(secondController.glassSettings.highlightEnabled, isTrue);
     });
 
-    test('calendar reminders surface due plan events and dismiss cleanly',
-        () async {
-      final tempDir = await Directory.systemTemp.createTemp(
-        'research_life_controller_reminder_test',
-      );
-      addTearDown(() => tempDir.delete(recursive: true));
-      final database = AppDatabase(NativeDatabase.memory());
-      addTearDown(database.close);
-      final manualEventsRepository = ManualEventsRepository(database);
-      final preferencesRepository = PreferencesRepository(database);
-      final controller = ResearchLifeController(
-        importService: const ImportService(),
-        analysisService: const AnalysisService(),
-        reviewService: const ReviewService(),
-        institutionCalendarService: const InstitutionCalendarService(),
-        localWorkspaceService: LocalWorkspaceService(
-          storageDirectoryResolver: () async => tempDir,
-        ),
-        manualEventsRepository: manualEventsRepository,
-        preferencesRepository: preferencesRepository,
-      );
-      addTearDown(controller.dispose);
+    test(
+      'calendar reminders surface due plan events and dismiss cleanly',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'research_life_controller_reminder_test',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final database = AppDatabase(NativeDatabase.memory());
+        addTearDown(database.close);
+        final manualEventsRepository = ManualEventsRepository(database);
+        final preferencesRepository = PreferencesRepository(database);
+        final controller = ResearchLifeController(
+          importService: const ImportService(),
+          analysisService: const AnalysisService(),
+          reviewService: const ReviewService(),
+          institutionCalendarService: const InstitutionCalendarService(),
+          localWorkspaceService: LocalWorkspaceService(
+            storageDirectoryResolver: () async => tempDir,
+          ),
+          manualEventsRepository: manualEventsRepository,
+          preferencesRepository: preferencesRepository,
+        );
+        addTearDown(controller.dispose);
 
-      expect(controller.calendarRemindersEnabled, isTrue);
-      expect(controller.pendingReminders, isEmpty);
+        expect(controller.calendarRemindersEnabled, isTrue);
+        expect(controller.pendingReminders, isEmpty);
 
-      controller.addManualEvent(
-        date: DateTime.now(),
-        title: '现在开会讨论方案',
-        category: ItemCategory.work,
-        type: EventType.plan,
-      );
-      await controller.waitForPendingManualEventPersistence();
+        controller.addManualEvent(
+          date: DateTime.now(),
+          title: '现在开会讨论方案',
+          category: ItemCategory.work,
+          type: EventType.plan,
+        );
+        await controller.waitForPendingManualEventPersistence();
 
-      await controller.checkCalendarRemindersNow();
+        await controller.checkCalendarRemindersNow();
 
-      expect(controller.pendingReminders, isNotEmpty);
-      expect(controller.pendingReminders.first.title, '现在开会讨论方案');
+        expect(controller.pendingReminders, isNotEmpty);
+        expect(controller.pendingReminders.first.title, '现在开会讨论方案');
 
-      final eventId = controller.pendingReminders.first.eventId;
-      controller.dismissReminder(eventId);
-      expect(controller.pendingReminders, isEmpty);
+        final eventId = controller.pendingReminders.first.eventId;
+        controller.dismissReminder(eventId);
+        expect(controller.pendingReminders, isEmpty);
 
-      // 关闭提醒后不再产生新提醒。
-      await controller.setCalendarRemindersEnabled(false);
-      expect(controller.calendarRemindersEnabled, isFalse);
-      await controller.checkCalendarRemindersNow();
-      expect(controller.pendingReminders, isEmpty);
+        // 关闭提醒后不再产生新提醒。
+        await controller.setCalendarRemindersEnabled(false);
+        expect(controller.calendarRemindersEnabled, isFalse);
+        await controller.checkCalendarRemindersNow();
+        expect(controller.pendingReminders, isEmpty);
 
-      final stored = await preferencesRepository.loadCalendarReminderEnabled();
-      expect(stored, isFalse);
-    });
+        final stored = await preferencesRepository
+            .loadCalendarReminderEnabled();
+        expect(stored, isFalse);
+      },
+    );
 
     test('pin lock enables, verifies and persists across restart', () async {
       final tempDir = await Directory.systemTemp.createTemp(
@@ -1202,7 +1215,8 @@ TITLE: 测试大学 2026 学年校历
       final firstController = createController();
       expect(firstController.pinLockEnabled, isFalse);
 
-      final message = await firstController.enablePinLock('123456');      expect(message, contains('已设置'));
+      final message = await firstController.enablePinLock('123456');
+      expect(message, contains('已设置'));
       expect(firstController.pinLockEnabled, isTrue);
       expect(firstController.verifyPin('123456'), isTrue);
       expect(firstController.verifyPin('000000'), isFalse);
@@ -1261,54 +1275,57 @@ TITLE: 测试大学 2026 学年校历
       expect(controller.isLocked, isFalse);
     });
 
-    test('close to tray defaults on and persists through preferences', () async {
-      final tempDir = await Directory.systemTemp.createTemp(
-        'research_life_controller_close_to_tray_test',
-      );
-      addTearDown(() => tempDir.delete(recursive: true));
-      final database = AppDatabase(NativeDatabase.memory());
-      addTearDown(database.close);
-      final preferencesRepository = PreferencesRepository(database);
+    test(
+      'close to tray defaults on and persists through preferences',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'research_life_controller_close_to_tray_test',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final database = AppDatabase(NativeDatabase.memory());
+        addTearDown(database.close);
+        final preferencesRepository = PreferencesRepository(database);
 
-      // 默认开启托盘模式。
-      final firstController = ResearchLifeController(
-        importService: const ImportService(),
-        analysisService: const AnalysisService(),
-        reviewService: const ReviewService(),
-        institutionCalendarService: const InstitutionCalendarService(),
-        localWorkspaceService: LocalWorkspaceService(
-          storageDirectoryResolver: () async => tempDir,
-        ),
-        preferencesRepository: preferencesRepository,
-      );
-      addTearDown(firstController.dispose);
-      await firstController.ensureCloseToTrayLoaded();
-      expect(firstController.closeToTray, isTrue);
+        // 默认开启托盘模式。
+        final firstController = ResearchLifeController(
+          importService: const ImportService(),
+          analysisService: const AnalysisService(),
+          reviewService: const ReviewService(),
+          institutionCalendarService: const InstitutionCalendarService(),
+          localWorkspaceService: LocalWorkspaceService(
+            storageDirectoryResolver: () async => tempDir,
+          ),
+          preferencesRepository: preferencesRepository,
+        );
+        addTearDown(firstController.dispose);
+        await firstController.ensureCloseToTrayLoaded();
+        expect(firstController.closeToTray, isTrue);
 
-      // 关闭后持久化，新实例读取到 false。
-      await firstController.setCloseToTray(false);
-      final secondController = ResearchLifeController(
-        importService: const ImportService(),
-        analysisService: const AnalysisService(),
-        reviewService: const ReviewService(),
-        institutionCalendarService: const InstitutionCalendarService(),
-        localWorkspaceService: LocalWorkspaceService(
-          storageDirectoryResolver: () async => tempDir,
-        ),
-        preferencesRepository: preferencesRepository,
-      );
-      addTearDown(secondController.dispose);
-      await secondController.ensureCloseToTrayLoaded();
-      expect(secondController.closeToTray, isFalse);
+        // 关闭后持久化，新实例读取到 false。
+        await firstController.setCloseToTray(false);
+        final secondController = ResearchLifeController(
+          importService: const ImportService(),
+          analysisService: const AnalysisService(),
+          reviewService: const ReviewService(),
+          institutionCalendarService: const InstitutionCalendarService(),
+          localWorkspaceService: LocalWorkspaceService(
+            storageDirectoryResolver: () async => tempDir,
+          ),
+          preferencesRepository: preferencesRepository,
+        );
+        addTearDown(secondController.dispose);
+        await secondController.ensureCloseToTrayLoaded();
+        expect(secondController.closeToTray, isFalse);
 
-      // 今日待办请求计数自增。
-      var requested = 0;
-      secondController.todayTodoDialogRequests.addListener(() {
-        requested = secondController.todayTodoDialogRequests.value;
-      });
-      secondController.requestTodayTodoDialog();
-      expect(requested, greaterThan(0));
-    });
+        // 今日待办请求计数自增。
+        var requested = 0;
+        secondController.todayTodoDialogRequests.addListener(() {
+          requested = secondController.todayTodoDialogRequests.value;
+        });
+        secondController.requestTodayTodoDialog();
+        expect(requested, greaterThan(0));
+      },
+    );
   });
 }
 
