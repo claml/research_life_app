@@ -2,12 +2,24 @@ import 'package:drift/drift.dart';
 
 import '../../../core/models/app_models.dart';
 import '../app_database.dart';
+import '../../storage/local_data_operation_coordinator.dart';
 
 /// 独立 Markdown 笔记的数据访问（本地优先，同步由 Outbox/引擎负责）。
 class NotesRepository {
-  const NotesRepository(this._database);
+  const NotesRepository(
+    this._database, {
+    LocalDataOperationCoordinator? operationCoordinator,
+  }) : _operationCoordinator = operationCoordinator;
 
   final AppDatabase _database;
+  final LocalDataOperationCoordinator? _operationCoordinator;
+
+  Future<T> _write<T>(Future<T> Function() operation) {
+    final coordinator = _operationCoordinator;
+    return coordinator == null
+        ? operation()
+        : coordinator.runExclusive(operation);
+  }
 
   Future<List<UserNote>> loadNotes() async {
     final rows =
@@ -35,28 +47,32 @@ class NotesRepository {
   }
 
   Future<void> saveNote(UserNote note) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await _database
-        .into(_database.notes)
-        .insertOnConflictUpdate(
-          NotesCompanion.insert(
-            id: note.id,
-            title: note.title,
-            contentMarkdown: Value(note.contentMarkdown),
-            createdAt: now,
-            updatedAt: now,
-            syncVersion: const Value(1),
-            syncState: const Value('local'),
-            deviceId: const Value(null),
-            isDeleted: const Value(false),
-          ),
-        );
+    await _write(() async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await _database
+          .into(_database.notes)
+          .insertOnConflictUpdate(
+            NotesCompanion.insert(
+              id: note.id,
+              title: note.title,
+              contentMarkdown: Value(note.contentMarkdown),
+              createdAt: now,
+              updatedAt: now,
+              syncVersion: const Value(1),
+              syncState: const Value('local'),
+              deviceId: const Value(null),
+              isDeleted: const Value(false),
+            ),
+          );
+    });
   }
 
   Future<void> deleteById(String id) async {
-    await (_database.delete(
-      _database.notes,
-    )..where((note) => note.id.equals(id))).go();
+    await _write(() async {
+      await (_database.delete(
+        _database.notes,
+      )..where((note) => note.id.equals(id))).go();
+    });
   }
 
   UserNote _noteFromRow(Note row) {

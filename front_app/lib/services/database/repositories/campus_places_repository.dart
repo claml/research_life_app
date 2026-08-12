@@ -2,13 +2,25 @@ import 'package:drift/drift.dart';
 
 import '../../../core/models/app_models.dart';
 import '../app_database.dart' as db;
+import '../../storage/local_data_operation_coordinator.dart';
 
 class CampusPlacesRepository {
-  const CampusPlacesRepository(this._database);
+  const CampusPlacesRepository(
+    this._database, {
+    LocalDataOperationCoordinator? operationCoordinator,
+  }) : _operationCoordinator = operationCoordinator;
 
   static const _seededDefaultsKey = 'campusPlacesSeeded';
 
   final db.AppDatabase _database;
+  final LocalDataOperationCoordinator? _operationCoordinator;
+
+  Future<T> _write<T>(Future<T> Function() operation) {
+    final coordinator = _operationCoordinator;
+    return coordinator == null
+        ? operation()
+        : coordinator.runExclusive(operation);
+  }
 
   Future<bool> hasSeededDefaults() async {
     final row =
@@ -20,15 +32,17 @@ class CampusPlacesRepository {
   }
 
   Future<void> markSeededDefaults() async {
-    await _database
-        .into(_database.preferences)
-        .insertOnConflictUpdate(
-          db.PreferencesCompanion.insert(
-            key: _seededDefaultsKey,
-            value: 'true',
-            updatedAt: DateTime.now().millisecondsSinceEpoch,
-          ),
-        );
+    await _write(() async {
+      await _database
+          .into(_database.preferences)
+          .insertOnConflictUpdate(
+            db.PreferencesCompanion.insert(
+              key: _seededDefaultsKey,
+              value: 'true',
+              updatedAt: DateTime.now().millisecondsSinceEpoch,
+            ),
+          );
+    });
   }
 
   Future<List<CampusPlace>> loadCampusPlaces() async {
@@ -44,42 +58,48 @@ class CampusPlacesRepository {
   }
 
   Future<void> saveCampusPlace(CampusPlace place) async {
-    await _database
-        .into(_database.campusPlaces)
-        .insertOnConflictUpdate(
-          db.CampusPlacesCompanion.insert(
-            id: place.id,
-            name: place.name,
-            category: place.category.name,
-            note: place.note,
-            normalizedDx: place.normalizedDx,
-            normalizedDy: place.normalizedDy,
-            iconKey: place.iconKey,
-            colorKey: place.colorKey,
-            zoneId: Value(place.zoneId),
-            isFavorite: Value(place.isFavorite),
-            isMine: Value(place.isMine),
-            lastVisitedAt: Value(_nullableDateTimeToInt(place.lastVisitedAt)),
-            logCount: Value(place.logCount),
-            heatScore: Value(place.heatScore),
-            createdAt: _dateTimeToInt(place.createdAt),
-            updatedAt: _dateTimeToInt(place.updatedAt),
-          ),
-        );
+    await _write(() async {
+      await _database
+          .into(_database.campusPlaces)
+          .insertOnConflictUpdate(
+            db.CampusPlacesCompanion.insert(
+              id: place.id,
+              name: place.name,
+              category: place.category.name,
+              note: place.note,
+              normalizedDx: place.normalizedDx,
+              normalizedDy: place.normalizedDy,
+              iconKey: place.iconKey,
+              colorKey: place.colorKey,
+              zoneId: Value(place.zoneId),
+              isFavorite: Value(place.isFavorite),
+              isMine: Value(place.isMine),
+              lastVisitedAt: Value(_nullableDateTimeToInt(place.lastVisitedAt)),
+              logCount: Value(place.logCount),
+              heatScore: Value(place.heatScore),
+              createdAt: _dateTimeToInt(place.createdAt),
+              updatedAt: _dateTimeToInt(place.updatedAt),
+            ),
+          );
+    });
   }
 
   Future<void> saveCampusPlaces(Iterable<CampusPlace> places) async {
-    await _database.transaction(() async {
-      for (final place in places) {
-        await saveCampusPlace(place);
-      }
+    await _write(() async {
+      await _database.transaction(() async {
+        for (final place in places) {
+          await saveCampusPlace(place);
+        }
+      });
     });
   }
 
   Future<void> deleteCampusPlace(String id) async {
-    await (_database.delete(
-      _database.campusPlaces,
-    )..where((place) => place.id.equals(id))).go();
+    await _write(() async {
+      await (_database.delete(
+        _database.campusPlaces,
+      )..where((place) => place.id.equals(id))).go();
+    });
   }
 
   CampusPlace _placeFromRow(db.CampusPlace row) {

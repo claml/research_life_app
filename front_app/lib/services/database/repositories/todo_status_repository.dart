@@ -2,6 +2,7 @@ import 'package:drift/drift.dart';
 
 import '../../../core/models/app_models.dart';
 import '../app_database.dart';
+import '../../storage/local_data_operation_coordinator.dart';
 
 /// 单条事件的待办状态（与事件本体分离存储）。
 class EventTodoState {
@@ -32,9 +33,20 @@ class EventTodoState {
 }
 
 class TodoStatusRepository {
-  const TodoStatusRepository(this._database);
+  const TodoStatusRepository(
+    this._database, {
+    LocalDataOperationCoordinator? operationCoordinator,
+  }) : _operationCoordinator = operationCoordinator;
 
   final AppDatabase _database;
+  final LocalDataOperationCoordinator? _operationCoordinator;
+
+  Future<T> _write<T>(Future<T> Function() operation) {
+    final coordinator = _operationCoordinator;
+    return coordinator == null
+        ? operation()
+        : coordinator.runExclusive(operation);
+  }
 
   Future<Map<String, EventTodoState>> loadAll() async {
     final rows = await _database.select(_database.todoStatus).get();
@@ -52,27 +64,31 @@ class TodoStatusRepository {
   }
 
   Future<void> upsert(EventTodoState state) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await _database
-        .into(_database.todoStatus)
-        .insertOnConflictUpdate(
-          TodoStatusCompanion.insert(
-            eventId: state.eventId,
-            isDone: Value(state.isDone),
-            priority: Value(state.priority.name),
-            completedAt: Value(state.completedAt?.millisecondsSinceEpoch),
-            updatedAt: now,
-          ),
-        );
+    await _write(() async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await _database
+          .into(_database.todoStatus)
+          .insertOnConflictUpdate(
+            TodoStatusCompanion.insert(
+              eventId: state.eventId,
+              isDone: Value(state.isDone),
+              priority: Value(state.priority.name),
+              completedAt: Value(state.completedAt?.millisecondsSinceEpoch),
+              updatedAt: now,
+            ),
+          );
+    });
   }
 
   Future<void> deleteForEvents(List<String> eventIds) async {
     if (eventIds.isEmpty) {
       return;
     }
-    await (_database.delete(
-      _database.todoStatus,
-    )..where((row) => row.eventId.isIn(eventIds))).go();
+    await _write(() async {
+      await (_database.delete(
+        _database.todoStatus,
+      )..where((row) => row.eventId.isIn(eventIds))).go();
+    });
   }
 
   TodoPriority _priorityFromName(String name) {

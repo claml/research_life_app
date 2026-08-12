@@ -6,22 +6,33 @@ import '../../../core/models/app_models.dart';
 import '../app_database.dart';
 import '../snapshots/session_snapshot.dart';
 import '../snapshots/session_snapshot_migrator.dart';
+import '../../storage/local_data_operation_coordinator.dart';
 
 class SessionsRepository {
   SessionsRepository(
     this._database, {
     String createdByAppVersion = SessionSnapshot.defaultCreatedByAppVersion,
     SessionSnapshotMigrator snapshotMigrator = const SessionSnapshotMigrator(),
+    LocalDataOperationCoordinator? operationCoordinator,
   }) : _createdByAppVersion = createdByAppVersion,
-       _snapshotMigrator = snapshotMigrator;
+       _snapshotMigrator = snapshotMigrator,
+       _operationCoordinator = operationCoordinator;
 
   final AppDatabase _database;
   final String _createdByAppVersion;
   final SessionSnapshotMigrator _snapshotMigrator;
+  final LocalDataOperationCoordinator? _operationCoordinator;
   final List<SessionSnapshotWarning> _snapshotWarnings = [];
 
   List<SessionSnapshotWarning> get snapshotWarnings =>
       List.unmodifiable(_snapshotWarnings);
+
+  Future<T> _write<T>(Future<T> Function() operation) {
+    final coordinator = _operationCoordinator;
+    return coordinator == null
+        ? operation()
+        : coordinator.runExclusive(operation);
+  }
 
   Future<List<SessionRecord>> loadSessions() async {
     _snapshotWarnings.clear();
@@ -98,7 +109,11 @@ class SessionsRepository {
     return sessions;
   }
 
-  Future<void> saveSession(SessionRecord session) async {
+  Future<void> saveSession(SessionRecord session) {
+    return _write(() => _saveSession(session));
+  }
+
+  Future<void> _saveSession(SessionRecord session) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     final confirmedAt = _dateTimeToInt(session.confirmedAt);
     await _database.transaction(() async {
@@ -216,7 +231,11 @@ class SessionsRepository {
     });
   }
 
-  Future<void> deleteSession(String sessionId) async {
+  Future<void> deleteSession(String sessionId) {
+    return _write(() => _deleteSession(sessionId));
+  }
+
+  Future<void> _deleteSession(String sessionId) async {
     await _database.transaction(() async {
       final existingEvents = await (_database.select(
         _database.events,
@@ -274,7 +293,11 @@ class SessionsRepository {
   }
 
   /// 从云端拉取的快照 JSON 恢复并保存会话（幂等覆盖）。
-  Future<void> saveSessionFromSnapshotJson(String snapshotJson) async {
+  Future<void> saveSessionFromSnapshotJson(String snapshotJson) {
+    return _write(() => _saveSessionFromSnapshotJson(snapshotJson));
+  }
+
+  Future<void> _saveSessionFromSnapshotJson(String snapshotJson) async {
     final session = await _sessionFromSnapshotJson(snapshotJson);
     if (session == null) {
       return;
