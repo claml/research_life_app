@@ -61,49 +61,27 @@ class _HomePageState extends State<HomePage>
         final isDay = snapshot?.isDay ?? true;
         final animationsEnabled = controller.weatherAnimationEnabled;
 
-        final layers = <Widget>[
-          Center(
-            child: Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: compact ? 28 : 56,
-                vertical: 32,
-              ),
-              child: _HomeClockDisplay(
-                compact: compact,
-                theme: theme,
-                tokens: tokens,
-              ),
-            ),
-          ),
+        final foreground = <Widget>[
           Positioned(
-            top: compact ? 16 : 22,
-            right: compact ? 16 : 24,
-            left: compact ? 16 : null,
-            child: Align(
-              alignment: Alignment.topRight,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  _WeatherStatusPill(
-                    snapshot: snapshot,
-                    location: controller.weatherLocation,
-                    busy: controller.weatherBusy,
-                    error: controller.weatherError,
-                    compact: compact,
-                    onRefresh: () => _refreshWeather(controller),
-                    onChooseCity: () => _openCityDialog(controller),
-                  ),
-                  if (controller.showHomeTodoHint) ...[
-                    const SizedBox(height: 12),
-                    _TodoGlassHint(
-                      events: controller.todayTodoEvents,
-                      compact: compact,
-                      onDismiss: () => controller.dismissHomeTodoHint(),
-                    ),
-                  ],
-                ],
-              ),
+            left: compact ? 18 : 54,
+            top: compact ? 18 : 44,
+            bottom: compact ? 18 : 44,
+            right: compact ? 18 : null,
+            width: compact ? null : 440,
+            child: _StandbyGlassPanel(
+              compact: compact,
+              theme: theme,
+              tokens: tokens,
+              snapshot: snapshot,
+              location: controller.weatherLocation,
+              busy: controller.weatherBusy,
+              error: controller.weatherError,
+              todoEvents: controller.showHomeTodoHint
+                  ? controller.todayTodoEvents
+                  : const [],
+              onRefresh: () => _refreshWeather(controller),
+              onChooseCity: () => _openCityDialog(controller),
+              onDismissTodo: () => controller.dismissHomeTodoHint(),
             ),
           ),
           Positioned(
@@ -116,33 +94,46 @@ class _HomePageState extends State<HomePage>
           ),
         ];
 
-        if (!animationsEnabled) {
-          return Stack(children: layers);
-        }
-
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: const Alignment(0, -0.16),
-              radius: 1.12,
-              colors: _weatherGradientColors(tokens, condition, isDay),
-              stops: const [0, 0.58, 1],
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.asset(
+              'assets/weather/cloudscape.png',
+              fit: BoxFit.cover,
+              filterQuality: FilterQuality.high,
             ),
-          ),
-          child: Stack(
-            children: [
-              Positioned.fill(
-                child: _WeatherBackdrop(
-                  animation: _weatherMotion,
-                  condition: condition,
-                  isDay: isDay,
-                  reduceMotion: media.disableAnimations,
-                  tokens: tokens,
+            DecoratedBox(
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                  colors: [
+                    Colors.white.withValues(alpha: 0.09),
+                    _weatherGradientColors(
+                      tokens,
+                      condition,
+                      isDay,
+                    ).last.withValues(alpha: 0.13),
+                    Colors.black.withValues(alpha: 0.1),
+                  ],
                 ),
               ),
-              ...layers,
-            ],
-          ),
+            ),
+            if (animationsEnabled)
+              Positioned.fill(
+                child: Opacity(
+                  opacity: 0.34,
+                  child: _WeatherBackdrop(
+                    animation: _weatherMotion,
+                    condition: condition,
+                    isDay: isDay,
+                    reduceMotion: media.disableAnimations,
+                    tokens: tokens,
+                  ),
+                ),
+              ),
+            ...foreground,
+          ],
         );
       },
     );
@@ -236,6 +227,91 @@ class _HomePageState extends State<HomePage>
   }
 }
 
+class _StandbyGlassPanel extends StatelessWidget {
+  const _StandbyGlassPanel({
+    required this.compact,
+    required this.theme,
+    required this.tokens,
+    required this.snapshot,
+    required this.location,
+    required this.busy,
+    required this.error,
+    required this.todoEvents,
+    required this.onRefresh,
+    required this.onChooseCity,
+    required this.onDismissTodo,
+  });
+
+  final bool compact;
+  final ThemeData theme;
+  final AppTokens tokens;
+  final WeatherSnapshot? snapshot;
+  final WeatherLocation? location;
+  final bool busy;
+  final String? error;
+  final List<EventItem> todoEvents;
+  final VoidCallback onRefresh;
+  final VoidCallback onChooseCity;
+  final VoidCallback onDismissTodo;
+
+  @override
+  Widget build(BuildContext context) {
+    return FrostedGlass(
+      borderRadius: compact ? 26 : 30,
+      padding: EdgeInsets.fromLTRB(
+        compact ? 22 : 34,
+        compact ? 22 : 30,
+        compact ? 22 : 34,
+        compact ? 22 : 30,
+      ),
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Text(
+              '研LIFE',
+              style: theme.textTheme.headlineSmall?.copyWith(
+                color: tokens.accent,
+                fontWeight: FontWeight.w700,
+                letterSpacing: -0.4,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              '科研与生活，各留一半。',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: tokens.textSecondary,
+              ),
+            ),
+            SizedBox(height: compact ? 24 : 34),
+            _HomeClockDisplay(compact: compact, theme: theme, tokens: tokens),
+            SizedBox(height: compact ? 20 : 28),
+            Divider(color: tokens.borderSoft),
+            const SizedBox(height: 14),
+            _WeatherStatusPill(
+              snapshot: snapshot,
+              location: location,
+              busy: busy,
+              error: error,
+              compact: compact,
+              onRefresh: onRefresh,
+              onChooseCity: onChooseCity,
+            ),
+            if (todoEvents.isNotEmpty) ...[
+              const SizedBox(height: 14),
+              _TodoGlassHint(
+                events: todoEvents,
+                compact: compact,
+                onDismiss: onDismissTodo,
+              ),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 时钟独立刷新，避免天气等控制器更新时重绘整页动画层。
 class _HomeClockDisplay extends StatefulWidget {
   const _HomeClockDisplay({
@@ -280,7 +356,7 @@ class _HomeClockDisplayState extends State<_HomeClockDisplay> {
 
     return Column(
       mainAxisSize: MainAxisSize.min,
-      crossAxisAlignment: CrossAxisAlignment.center,
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Semantics(
           label: '当前时间 $timeLabel',
@@ -291,21 +367,21 @@ class _HomeClockDisplayState extends State<_HomeClockDisplay> {
               maxLines: 1,
               style: widget.theme.textTheme.displayLarge?.copyWith(
                 color: widget.tokens.textPrimary,
-                fontSize: widget.compact ? 92 : 156,
-                fontWeight: FontWeight.w700,
+                fontSize: widget.compact ? 78 : 112,
+                fontWeight: FontWeight.w500,
                 height: 0.95,
                 letterSpacing: 0,
               ),
             ),
           ),
         ),
-        SizedBox(height: widget.compact ? 24 : 34),
+        SizedBox(height: widget.compact ? 18 : 24),
         Text(
           _HomePageState._formatGregorianDate(_now),
-          textAlign: TextAlign.center,
+          textAlign: TextAlign.left,
           style: widget.theme.textTheme.headlineSmall?.copyWith(
             color: widget.tokens.textSecondary,
-            fontSize: widget.compact ? 21 : 28,
+            fontSize: widget.compact ? 18 : 22,
             fontWeight: FontWeight.w600,
             height: 1.25,
             letterSpacing: 0,
@@ -314,10 +390,10 @@ class _HomeClockDisplayState extends State<_HomeClockDisplay> {
         const SizedBox(height: 10),
         Text(
           _HomePageState._formatLunarDate(_now),
-          textAlign: TextAlign.center,
+          textAlign: TextAlign.left,
           style: widget.theme.textTheme.titleLarge?.copyWith(
             color: widget.tokens.textMuted,
-            fontSize: widget.compact ? 18 : 23,
+            fontSize: widget.compact ? 15 : 17,
             fontWeight: FontWeight.w500,
             height: 1.3,
             letterSpacing: 0,
