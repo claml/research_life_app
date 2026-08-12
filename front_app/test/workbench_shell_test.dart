@@ -53,27 +53,27 @@ void main() {
     await tester.pumpWidget(_testShell());
     expect(
       tester.getSize(find.byKey(const Key('workbench-sidebar'))).width,
-      224,
+      216,
     );
 
     await tester.tap(find.text('收起导航'));
     await tester.pumpAndSettle();
     expect(
       tester.getSize(find.byKey(const Key('workbench-sidebar'))).width,
-      80,
+      72,
     );
     await tester.tap(find.byTooltip('展开导航'));
     await tester.pumpAndSettle();
     expect(
       tester.getSize(find.byKey(const Key('workbench-sidebar'))).width,
-      224,
+      216,
     );
 
     await _setSurface(tester, const Size(980, 800), resetAfter: false);
     await tester.pumpAndSettle();
     expect(
       tester.getSize(find.byKey(const Key('workbench-sidebar'))).width,
-      80,
+      72,
     );
     expect(tester.takeException(), isNull);
   });

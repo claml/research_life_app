@@ -58,6 +58,10 @@ void main() {
         assetImages.map((image) => image.assetName),
         contains('assets/weather/unknown.png'),
       );
+      expect(
+        tester.getSize(find.byKey(const Key('weather-standby-panel'))).height,
+        lessThan(640),
+      );
       expect(find.text('研LIFE'), findsOneWidget);
       expect(tester.takeException(), isNull);
     },

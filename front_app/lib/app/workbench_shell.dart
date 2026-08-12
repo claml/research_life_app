@@ -46,8 +46,8 @@ class WorkbenchShell extends StatefulWidget {
 }
 
 class _WorkbenchShellState extends State<WorkbenchShell> {
-  static const _expandedSidebarWidth = 224.0;
-  static const _collapsedSidebarWidth = 80.0;
+  static const _expandedSidebarWidth = 216.0;
+  static const _collapsedSidebarWidth = 72.0;
   static const _compactBreakpoint = 1040.0;
 
   late WorkbenchNavigationController _navigation;
@@ -229,7 +229,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                       ? _collapsedSidebarWidth
                       : _expandedSidebarWidth;
                   return Padding(
-                    padding: const EdgeInsets.all(20),
+                    padding: const EdgeInsets.all(16),
                     child: Row(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
@@ -250,7 +250,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                             () => _sidebarCollapsed = !_sidebarCollapsed,
                           ),
                         ),
-                        const SizedBox(width: 24),
+                        const SizedBox(width: 20),
                         Expanded(
                           child: RepaintBoundary(
                             child: DecoratedBox(
@@ -443,9 +443,14 @@ class _WorkbenchSidebar extends StatelessWidget {
       curve: Curves.easeOutCubic,
       width: width,
       decoration: BoxDecoration(
-        color: tokens.sidebarSurface,
+        gradient: LinearGradient(
+          begin: Alignment.topCenter,
+          end: Alignment.bottomCenter,
+          colors: [tokens.sidebarSurface, tokens.sidebarSurfaceStrong],
+        ),
         borderRadius: BorderRadius.circular(tokens.radiusXLarge),
-        boxShadow: tokens.shadowMd,
+        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+        boxShadow: tokens.shadowSm,
       ),
       child: LayoutBuilder(
         builder: (context, constraints) {
@@ -456,23 +461,23 @@ class _WorkbenchSidebar extends StatelessWidget {
               color: Colors.transparent,
               child: Padding(
                 padding: EdgeInsets.fromLTRB(
-                  visuallyCollapsed ? 10 : 16,
-                  18,
-                  visuallyCollapsed ? 10 : 16,
+                  visuallyCollapsed ? 8 : 14,
                   16,
+                  visuallyCollapsed ? 8 : 14,
+                  14,
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
                     _SidebarBrand(collapsed: visuallyCollapsed),
-                    const SizedBox(height: 18),
+                    const SizedBox(height: 14),
                     _SidebarUtilityButton(
                       collapsed: visuallyCollapsed,
                       label: '搜索',
                       icon: Icons.search_rounded,
                       onPressed: onSearchRequested,
                     ),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     _SidebarNavButton(
                       label: weatherDestination.label,
                       icon: weatherDestination.icon,
@@ -481,9 +486,9 @@ class _WorkbenchSidebar extends StatelessWidget {
                       focusNode: weatherFocusNode,
                       onPressed: onWeatherSelected,
                     ),
-                    const SizedBox(height: 10),
-                    Divider(color: Colors.white.withValues(alpha: 0.12)),
                     const SizedBox(height: 8),
+                    Divider(color: Colors.white.withValues(alpha: 0.12)),
+                    const SizedBox(height: 6),
                     for (final destination in regularDestinations) ...[
                       _SidebarNavButton(
                         label: destination.label,
@@ -496,7 +501,7 @@ class _WorkbenchSidebar extends StatelessWidget {
                         onPressed: () =>
                             onWorkspaceSelected(destination.workspace),
                       ),
-                      const SizedBox(height: 8),
+                      const SizedBox(height: 6),
                     ],
                     const Spacer(),
                     _SidebarNavButton(
@@ -578,13 +583,16 @@ class _SidebarUtilityButton extends StatelessWidget {
         child: InkWell(
           onTap: onPressed,
           borderRadius: BorderRadius.circular(999),
+          hoverColor: Colors.white.withValues(alpha: 0.06),
+          highlightColor: Colors.transparent,
+          splashColor: Colors.white.withValues(alpha: 0.1),
           child: Container(
-            height: 44,
+            height: 42,
             padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 14),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.11),
+              color: Colors.white.withValues(alpha: 0.075),
               borderRadius: BorderRadius.circular(999),
-              border: Border.all(color: Colors.white.withValues(alpha: 0.18)),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
             ),
             child: Row(
               mainAxisAlignment: collapsed
@@ -648,38 +656,58 @@ class _SidebarNavButton extends StatelessWidget {
               onTap: onPressed,
               canRequestFocus: false,
               borderRadius: BorderRadius.circular(tokens.radiusSmall),
+              hoverColor: Colors.white.withValues(alpha: 0.06),
+              highlightColor: Colors.transparent,
+              splashColor: Colors.white.withValues(alpha: 0.1),
               child: AnimatedContainer(
                 duration: AppLayout.quickMotion,
-                height: 54,
+                height: 48,
                 padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 14),
                 decoration: BoxDecoration(
                   color: selected
-                      ? Colors.white.withValues(alpha: 0.19)
+                      ? Colors.white.withValues(alpha: 0.14)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(tokens.radiusSmall),
                   border: focusNode.hasFocus
                       ? Border.all(color: Colors.white.withValues(alpha: 0.86))
                       : null,
                 ),
-                child: Row(
-                  mainAxisAlignment: collapsed
-                      ? MainAxisAlignment.center
-                      : MainAxisAlignment.start,
+                child: Stack(
                   children: [
-                    Icon(icon, size: 21, color: Colors.white),
-                    if (!collapsed) ...[
-                      const SizedBox(width: 14),
-                      Text(
-                        label,
-                        style: Theme.of(context).textTheme.titleMedium
-                            ?.copyWith(
-                              color: Colors.white,
-                              fontWeight: selected
-                                  ? FontWeight.w600
-                                  : FontWeight.w500,
-                            ),
+                    if (selected)
+                      Positioned(
+                        left: collapsed ? 2 : 0,
+                        top: 12,
+                        bottom: 12,
+                        child: Container(
+                          width: 3,
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.9),
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                        ),
                       ),
-                    ],
+                    Row(
+                      mainAxisAlignment: collapsed
+                          ? MainAxisAlignment.center
+                          : MainAxisAlignment.start,
+                      children: [
+                        Icon(icon, size: 20, color: Colors.white),
+                        if (!collapsed) ...[
+                          const SizedBox(width: 12),
+                          Text(
+                            label,
+                            style: Theme.of(context).textTheme.titleMedium
+                                ?.copyWith(
+                                  color: Colors.white,
+                                  fontWeight: selected
+                                      ? FontWeight.w600
+                                      : FontWeight.w500,
+                                ),
+                          ),
+                        ],
+                      ],
+                    ),
                   ],
                 ),
               ),

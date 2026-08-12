@@ -79,23 +79,28 @@ class _HomePageState extends State<HomePage>
           Positioned(
             left: compact ? 18 : 54,
             top: compact ? 18 : 44,
-            bottom: compact ? 18 : 44,
             right: compact ? 18 : null,
-            width: compact ? null : 440,
-            child: _StandbyGlassPanel(
-              compact: compact,
-              theme: theme,
-              tokens: tokens,
-              snapshot: snapshot,
-              location: controller.weatherLocation,
-              busy: controller.weatherBusy,
-              error: controller.weatherError,
-              todoEvents: controller.showHomeTodoHint
-                  ? controller.todayTodoEvents
-                  : const [],
-              onRefresh: () => _refreshWeather(controller),
-              onChooseCity: () => _openCityDialog(controller),
-              onDismissTodo: () => controller.dismissHomeTodoHint(),
+            width: compact ? null : 420,
+            child: ConstrainedBox(
+              key: const Key('weather-standby-panel'),
+              constraints: BoxConstraints(
+                maxHeight: compact ? media.size.height - 36 : 620,
+              ),
+              child: _StandbyGlassPanel(
+                compact: compact,
+                theme: theme,
+                tokens: tokens,
+                snapshot: snapshot,
+                location: controller.weatherLocation,
+                busy: controller.weatherBusy,
+                error: controller.weatherError,
+                todoEvents: controller.showHomeTodoHint
+                    ? controller.todayTodoEvents
+                    : const [],
+                onRefresh: () => _refreshWeather(controller),
+                onChooseCity: () => _openCityDialog(controller),
+                onDismissTodo: () => controller.dismissHomeTodoHint(),
+              ),
             ),
           ),
           Positioned(
@@ -271,12 +276,12 @@ class _StandbyGlassPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return FrostedGlass(
-      borderRadius: compact ? 26 : 30,
+      borderRadius: compact ? 24 : 28,
       padding: EdgeInsets.fromLTRB(
-        compact ? 22 : 34,
         compact ? 22 : 30,
-        compact ? 22 : 34,
+        compact ? 22 : 26,
         compact ? 22 : 30,
+        compact ? 22 : 26,
       ),
       child: SingleChildScrollView(
         child: Column(
@@ -297,9 +302,9 @@ class _StandbyGlassPanel extends StatelessWidget {
                 color: tokens.textSecondary,
               ),
             ),
-            SizedBox(height: compact ? 24 : 34),
+            SizedBox(height: compact ? 22 : 28),
             _HomeClockDisplay(compact: compact, theme: theme, tokens: tokens),
-            SizedBox(height: compact ? 20 : 28),
+            SizedBox(height: compact ? 18 : 22),
             Divider(color: tokens.borderSoft),
             const SizedBox(height: 14),
             _WeatherStatusPill(
@@ -381,7 +386,7 @@ class _HomeClockDisplayState extends State<_HomeClockDisplay> {
               maxLines: 1,
               style: widget.theme.textTheme.displayLarge?.copyWith(
                 color: widget.tokens.textPrimary,
-                fontSize: widget.compact ? 78 : 112,
+                fontSize: widget.compact ? 72 : 96,
                 fontWeight: FontWeight.w500,
                 height: 0.95,
                 letterSpacing: 0,
@@ -389,7 +394,7 @@ class _HomeClockDisplayState extends State<_HomeClockDisplay> {
             ),
           ),
         ),
-        SizedBox(height: widget.compact ? 18 : 24),
+        SizedBox(height: widget.compact ? 16 : 20),
         Text(
           _HomePageState._formatGregorianDate(_now),
           textAlign: TextAlign.left,
