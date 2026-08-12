@@ -35,6 +35,9 @@ void main() {
     );
     await tester.pump();
     expect(find.byType(TodayWorkspace), findsOneWidget);
+    expect(find.byKey(const Key('today-open-workspace')), findsOneWidget);
+    expect(find.byKey(const Key('today-timeline')), findsOneWidget);
+    expect(find.byKey(const Key('today-todo-list')), findsOneWidget);
 
     controller.requestOpenPdfTools();
     await tester.pump();
