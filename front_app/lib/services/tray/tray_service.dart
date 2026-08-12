@@ -14,13 +14,25 @@ class TrayService extends TrayListener {
     required ResearchLifeController controller,
     required Future<void> Function() requestExit,
     Future<void> Function()? showContextMenu,
+    Future<bool> Function()? isWindowMinimized,
+    Future<void> Function()? showWindow,
+    Future<void> Function()? restoreWindow,
+    Future<void> Function()? focusWindow,
   }) : _controller = controller,
        _requestExit = requestExit,
-       _showContextMenu = showContextMenu ?? trayManager.popUpContextMenu;
+       _showContextMenu = showContextMenu ?? trayManager.popUpContextMenu,
+       _isWindowMinimized = isWindowMinimized ?? _defaultIsWindowMinimized,
+       _showWindow = showWindow ?? _defaultShowWindow,
+       _restoreWindow = restoreWindow ?? _defaultRestoreWindow,
+       _focusWindow = focusWindow ?? _defaultFocusWindow;
 
   final ResearchLifeController _controller;
   final Future<void> Function() _requestExit;
   final Future<void> Function() _showContextMenu;
+  final Future<bool> Function() _isWindowMinimized;
+  final Future<void> Function() _showWindow;
+  final Future<void> Function() _restoreWindow;
+  final Future<void> Function() _focusWindow;
   Future<void>? _exitFuture;
   bool _ready = false;
 
@@ -64,9 +76,12 @@ class TrayService extends TrayListener {
   }
 
   Future<void> showMainWindow() async {
-    await windowManager.show();
-    await windowManager.restore();
-    await windowManager.focus();
+    final wasMinimized = await _isWindowMinimized();
+    await _showWindow();
+    if (wasMinimized) {
+      await _restoreWindow();
+    }
+    await _focusWindow();
     _controller.notifyUserActivity();
   }
 
@@ -116,8 +131,7 @@ class TrayService extends TrayListener {
       case 'show':
         unawaited(showMainWindow());
       case 'today_todo':
-        unawaited(showMainWindow());
-        _controller.requestTodayTodoDialog();
+        unawaited(_showTodayTodo());
       case 'privacy_on':
         // 隐私屏模式：先匹配分辨率，再仅虚拟显示器输出。
         enterPrivacyScreen();
@@ -128,4 +142,17 @@ class TrayService extends TrayListener {
         unawaited(quit());
     }
   }
+
+  Future<void> _showTodayTodo() async {
+    await showMainWindow();
+    _controller.requestTodayTodoDialog();
+  }
 }
+
+Future<bool> _defaultIsWindowMinimized() => windowManager.isMinimized();
+
+Future<void> _defaultShowWindow() => windowManager.show();
+
+Future<void> _defaultRestoreWindow() => windowManager.restore();
+
+Future<void> _defaultFocusWindow() => windowManager.focus();
