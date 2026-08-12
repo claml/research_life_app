@@ -61,7 +61,10 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
-  if (message == WM_CLOSE && !close_confirmed_) {
+  if (message == WM_CLOSE) {
+    if (close_confirmed_) {
+      return Win32Window::MessageHandler(hwnd, message, wparam, lparam);
+    }
     if (!close_requested_) {
       RequestDartClose(hwnd);
     }
@@ -92,6 +95,7 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
 void FlutterWindow::RequestDartClose(HWND window) {
   close_requested_ = true;
 
+  auto cancel_close = [this]() { close_requested_ = false; };
   auto finish_close = [this, window]() {
     close_requested_ = false;
     close_confirmed_ = true;
@@ -106,7 +110,12 @@ void FlutterWindow::RequestDartClose(HWND window) {
   lifecycle_channel_->InvokeMethod(
       "requestClose", std::make_unique<flutter::EncodableValue>(),
       std::make_unique<flutter::MethodResultFunctions<flutter::EncodableValue>>(
-          [finish_close](const flutter::EncodableValue* result) {
+          [cancel_close, finish_close](const flutter::EncodableValue* result) {
+            if (result != nullptr && std::holds_alternative<bool>(*result) &&
+                !std::get<bool>(*result)) {
+              cancel_close();
+              return;
+            }
             finish_close();
           },
           [finish_close](const std::string& error_code,
@@ -114,7 +123,5 @@ void FlutterWindow::RequestDartClose(HWND window) {
                          const flutter::EncodableValue* error_details) {
             finish_close();
           },
-          [finish_close]() {
-            finish_close();
-          }));
+          [finish_close]() { finish_close(); }));
 }
