@@ -12,6 +12,20 @@ import '../../shared/widgets/frosted_glass.dart';
 import '../../state/research_life_controller.dart';
 import 'weather_palette.dart';
 
+String weatherBackgroundAssetFor(WeatherCondition condition) {
+  return switch (condition) {
+    WeatherCondition.clear => 'assets/weather/clear.png',
+    WeatherCondition.cloudy => 'assets/weather/cloudscape.png',
+    WeatherCondition.fog => 'assets/weather/fog.png',
+    WeatherCondition.dust => 'assets/weather/dust.png',
+    WeatherCondition.drizzle => 'assets/weather/drizzle.png',
+    WeatherCondition.rain => 'assets/weather/rain.png',
+    WeatherCondition.snow => 'assets/weather/snow.png',
+    WeatherCondition.thunderstorm => 'assets/weather/thunderstorm.png',
+    WeatherCondition.unknown => 'assets/weather/unknown.png',
+  };
+}
+
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
 
@@ -98,7 +112,7 @@ class _HomePageState extends State<HomePage>
           fit: StackFit.expand,
           children: [
             Image.asset(
-              'assets/weather/cloudscape.png',
+              weatherBackgroundAssetFor(condition),
               fit: BoxFit.cover,
               filterQuality: FilterQuality.high,
             ),

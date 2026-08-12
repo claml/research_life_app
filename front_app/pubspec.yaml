@@ -50,3 +50,4 @@ flutter:
     - assets/icon/app_icon.ico
     - assets/campus_map/
     - assets/pets/
+    - assets/weather/
