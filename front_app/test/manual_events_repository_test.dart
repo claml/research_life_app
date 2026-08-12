@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:research_life/core/models/app_models.dart';
 import 'package:research_life/services/database/app_database.dart';
 import 'package:research_life/services/database/repositories/manual_events_repository.dart';
+import 'package:research_life/services/database/repositories/todo_status_repository.dart';
 
 void main() {
   late AppDatabase database;
@@ -68,5 +69,32 @@ void main() {
     expect(loaded.single.title, 'Submit weekly report');
     expect(loaded.single.category, ItemCategory.study);
     expect(loaded.single.type, EventType.record);
+  });
+
+  test('deletes a manual event and its todo state atomically', () async {
+    final event = EventItem(
+      id: 'manual_delete_1',
+      title: 'Delete draft task',
+      category: ItemCategory.work,
+      type: EventType.plan,
+      startAt: DateTime(2026, 4, 27),
+      endAt: DateTime(2026, 4, 27),
+      origin: EventOrigin.manual,
+      sourceLabel: '手动添加',
+    );
+    final todoRepository = TodoStatusRepository(database);
+    await repository.saveManualEvent(event);
+    await todoRepository.upsert(
+      const EventTodoState(
+        eventId: 'manual_delete_1',
+        isDone: true,
+        priority: TodoPriority.high,
+      ),
+    );
+
+    await repository.deleteManualEvent(event.id);
+
+    expect(await repository.loadManualEvents(), isEmpty);
+    expect(await todoRepository.loadAll(), isNot(contains(event.id)));
   });
 }

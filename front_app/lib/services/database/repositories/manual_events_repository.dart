@@ -2,11 +2,23 @@ import 'package:drift/drift.dart';
 
 import '../../../core/models/app_models.dart';
 import '../app_database.dart';
+import '../../storage/local_data_operation_coordinator.dart';
 
 class ManualEventsRepository {
-  const ManualEventsRepository(this._database);
+  const ManualEventsRepository(
+    this._database, {
+    LocalDataOperationCoordinator? operationCoordinator,
+  }) : _operationCoordinator = operationCoordinator;
 
   final AppDatabase _database;
+  final LocalDataOperationCoordinator? _operationCoordinator;
+
+  Future<T> _write<T>(Future<T> Function() operation) {
+    final coordinator = _operationCoordinator;
+    return coordinator == null
+        ? operation()
+        : coordinator.runExclusive(operation);
+  }
 
   Future<List<EventItem>> loadManualEvents() async {
     final rows =
@@ -28,35 +40,50 @@ class ManualEventsRepository {
   }
 
   Future<void> saveManualEvent(EventItem event) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await _database
-        .into(_database.events)
-        .insertOnConflictUpdate(
-          EventsCompanion.insert(
-            id: event.id,
-            sessionId: const Value(null),
-            title: event.title,
-            category: event.category.name,
-            type: event.type.name,
-            origin: EventOrigin.manual.name,
-            startAt: _dateTimeToInt(event.startAt),
-            endAt: Value(_nullableDateTimeToInt(event.endAt)),
-            sourceLabel: Value(event.sourceLabel),
-            createdAt: now,
-            updatedAt: now,
-            syncVersion: const Value(1),
-            syncState: const Value('local'),
-            deviceId: const Value(null),
-            isDeleted: const Value(false),
-          ),
-        );
+    await _write(() async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await _database
+          .into(_database.events)
+          .insertOnConflictUpdate(
+            EventsCompanion.insert(
+              id: event.id,
+              sessionId: const Value(null),
+              title: event.title,
+              category: event.category.name,
+              type: event.type.name,
+              origin: EventOrigin.manual.name,
+              startAt: _dateTimeToInt(event.startAt),
+              endAt: Value(_nullableDateTimeToInt(event.endAt)),
+              sourceLabel: Value(event.sourceLabel),
+              createdAt: now,
+              updatedAt: now,
+              syncVersion: const Value(1),
+              syncState: const Value('local'),
+              deviceId: const Value(null),
+              isDeleted: const Value(false),
+            ),
+          );
+    });
   }
 
-  Future<void> deleteById(String id) async {
-    await (_database.delete(
-      _database.events,
-    )..where((event) => event.id.equals(id))).go();
+  Future<void> deleteManualEvent(String id) async {
+    await _write(() async {
+      await _database.transaction(() async {
+        await (_database.delete(
+          _database.todoStatus,
+        )..where((row) => row.eventId.equals(id))).go();
+        await (_database.delete(_database.events)..where(
+              (event) =>
+                  event.id.equals(id) &
+                  event.origin.equals(EventOrigin.manual.name) &
+                  event.sessionId.isNull(),
+            ))
+            .go();
+      });
+    });
   }
+
+  Future<void> deleteById(String id) => deleteManualEvent(id);
 
   EventItem _eventFromRow(Event row) {
     return EventItem(

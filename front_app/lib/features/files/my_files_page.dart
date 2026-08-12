@@ -1,16 +1,14 @@
-import 'dart:async';
+import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
 import 'package:flutter/material.dart';
+import 'package:path/path.dart' as p;
 
-import '../../app/auth_scope.dart';
 import '../../app/research_life_scope.dart';
 import '../../core/models/app_models.dart';
 import '../../core/theme/app_tokens.dart';
-import '../../core/utils/workspace_file_kind.dart';
 import '../../state/research_life_controller.dart';
 import 'cloud_file_dialogs.dart';
-import 'cloud_file_explorer.dart';
 
 class MyFilesPage extends StatefulWidget {
   const MyFilesPage({super.key});
@@ -23,28 +21,21 @@ class _MyFilesPageState extends State<MyFilesPage> {
   PdfLibraryDocument? _selectedLocal;
 
   @override
-  void initState() {
-    super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final auth = AuthScope.of(context);
-      if (auth.cloudSyncEnabled) {
-        final controller = ResearchLifeScope.of(context);
-        unawaited(controller.refreshCloudFiles(reconcile: true));
-      }
-    });
-  }
-
-  @override
   Widget build(BuildContext context) {
     final controller = ResearchLifeScope.read(context);
-    final auth = AuthScope.read(context);
     final tokens = context.tokens;
 
     return AnimatedBuilder(
-      animation: Listenable.merge([controller, auth]),
+      animation: controller,
       builder: (context, _) {
         final localDocs = controller.localMaterializedDocuments;
-        final allCloud = controller.cloudFileEntries;
+        final selectedId = _selectedLocal?.id;
+        final selected = selectedId == null
+            ? null
+            : controller.pdfDocumentById(selectedId);
+        if (selectedId != null && selected == null) {
+          _selectedLocal = null;
+        }
 
         return Padding(
           padding: const EdgeInsets.all(28),
@@ -59,122 +50,58 @@ class _MyFilesPageState extends State<MyFilesPage> {
               ),
               const SizedBox(height: 8),
               Text(
-                auth.isGuest
-                    ? '本地模式：可导入任意类型文件；PDF 进入科研文献，文本/PPT 进入文档查阅。'
-                    : '云端树形管理 + 本机文件库；打开方式按文件类型自动关联各功能模块。',
+                '文件仅保存在本机；PDF 可进入文献阅读，文本与办公文档可直接查阅。',
                 style: Theme.of(
                   context,
                 ).textTheme.bodyMedium?.copyWith(color: tokens.textSecondary),
               ),
               const SizedBox(height: 16),
               Expanded(
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Expanded(
-                      flex: 2,
-                      child: _FilePanel(
-                        title: '云端文件',
-                        subtitle: auth.isGuest
-                            ? '需登录'
-                            : '${allCloud.where((e) => !e.systemRoot && !e.isFolder).length} 个文件',
-                        child: auth.isGuest
-                            ? const _EmptyHint(message: '登录后可管理云端个人目录')
-                            : CloudFileExplorer(
-                                entries: allCloud,
-                                busy: controller.cloudFilesBusy,
-                                controller: controller,
-                                mode: CloudFileExplorerMode.manage,
-                                onOpenFile: (entry) =>
-                                    _openCloudFile(context, controller, entry),
-                                onMoveToLocal: (entry) => _moveCloudToLocal(
-                                  context,
-                                  controller,
-                                  entry,
-                                ),
+                child: _FilePanel(
+                  title: '本机文件',
+                  subtitle: '${localDocs.length} 项',
+                  toolbar: _LocalToolbar(
+                    selected: selected,
+                    onImport: () => _importLocalFile(context, controller),
+                    onRename: selected == null
+                        ? null
+                        : () => _renameLocal(context, controller, selected),
+                    onRenameFolder: selected == null
+                        ? null
+                        : () =>
+                              _renameLocalFolder(context, controller, selected),
+                    onDelete: selected == null
+                        ? null
+                        : () => _deleteLocal(context, controller, selected),
+                    onOpen: selected == null
+                        ? null
+                        : () => _openLocalFile(controller, selected),
+                    onPdfTools: selected?.fileKind.isPdf == true
+                        ? () => _goPdfTools(context, selected!)
+                        : null,
+                  ),
+                  child: localDocs.isEmpty
+                      ? const _EmptyHint(message: '尚无本机文件，点“导入”添加。')
+                      : ListView.separated(
+                          itemCount: localDocs.length,
+                          separatorBuilder: (_, _) => const Divider(height: 1),
+                          itemBuilder: (context, index) {
+                            final doc = localDocs[index];
+                            return Material(
+                              type: MaterialType.transparency,
+                              child: ListTile(
+                                selected: selected?.id == doc.id,
+                                leading: Icon(doc.fileKind.icon),
+                                title: Text(doc.title),
+                                subtitle: Text(doc.fileKind.label),
+                                onTap: () =>
+                                    setState(() => _selectedLocal = doc),
                               ),
-                      ),
-                    ),
-                    const SizedBox(width: 16),
-                    Expanded(
-                      child: _FilePanel(
-                        title: '本机文件',
-                        subtitle: '${localDocs.length} 项',
-                        toolbar: _LocalToolbar(
-                          selected: _selectedLocal,
-                          guest: auth.isGuest,
-                          cloudSync: auth.cloudSyncEnabled,
-                          onImport: () => _importLocalFile(context, controller),
-                          onRename: _selectedLocal == null
-                              ? null
-                              : () => _renameLocal(
-                                  context,
-                                  controller,
-                                  _selectedLocal!,
-                                ),
-                          onDelete: _selectedLocal == null
-                              ? null
-                              : () => _deleteLocal(
-                                  context,
-                                  controller,
-                                  _selectedLocal!,
-                                ),
-                          onSaveCloud:
-                              auth.cloudSyncEnabled && _selectedLocal != null
-                              ? () => _saveToCloud(
-                                  context,
-                                  controller,
-                                  _selectedLocal!.id,
-                                )
-                              : null,
-                          onOpen: _selectedLocal == null
-                              ? null
-                              : () =>
-                                    _openLocalFile(controller, _selectedLocal!),
-                          onPdfTools:
-                              _selectedLocal != null &&
-                                  _selectedLocal!.fileKind.isPdf
-                              ? () => _goPdfTools(context, _selectedLocal!)
-                              : null,
+                            );
+                          },
                         ),
-                        child: localDocs.isEmpty
-                            ? const _EmptyHint(
-                                message: '尚无本机文件。可从云端下载，或点「导入」添加。',
-                              )
-                            : ListView.separated(
-                                itemCount: localDocs.length,
-                                separatorBuilder: (_, _) =>
-                                    const Divider(height: 1),
-                                itemBuilder: (context, index) {
-                                  final doc = localDocs[index];
-                                  final selected = _selectedLocal?.id == doc.id;
-                                  return ListTile(
-                                    selected: selected,
-                                    leading: Icon(doc.fileKind.icon),
-                                    title: Text(doc.title),
-                                    subtitle: Text(
-                                      '${doc.fileKind.label}'
-                                      '${auth.isGuest ? '' : ' · ${doc.syncState}'}',
-                                    ),
-                                    onTap: () =>
-                                        setState(() => _selectedLocal = doc),
-                                  );
-                                },
-                              ),
-                      ),
-                    ),
-                  ],
                 ),
               ),
-              if (controller.cloudFilesMessage != null) ...[
-                const SizedBox(height: 8),
-                Text(
-                  controller.cloudFilesMessage!,
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodySmall?.copyWith(color: tokens.textMuted),
-                ),
-              ],
             ],
           ),
         );
@@ -184,22 +111,18 @@ class _MyFilesPageState extends State<MyFilesPage> {
 
   void _openLocalFile(
     ResearchLifeController controller,
-    PdfLibraryDocument doc,
+    PdfLibraryDocument document,
   ) {
     try {
-      if (doc.fileKind.isPdf) {
-        controller.requestOpenReading(documentId: doc.id);
-      } else if (doc.fileKind.isViewable) {
-        controller.requestOpenDocumentView(documentId: doc.id);
+      if (document.fileKind.isPdf) {
+        controller.requestOpenReading(documentId: document.id);
+      } else if (document.fileKind.isViewable) {
+        controller.requestOpenDocumentView(documentId: document.id);
       } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('该类型请使用 PDF 操作或在系统中用默认应用打开')),
-        );
+        _snack('该类型请在系统默认应用中打开。');
       }
     } catch (error) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$error')));
+      _snack('$error');
     }
   }
 
@@ -229,9 +152,6 @@ class _MyFilesPageState extends State<MyFilesPage> {
         'docx',
         'xls',
         'xlsx',
-        'png',
-        'jpg',
-        'jpeg',
       ],
     );
     final file = await openFile(acceptedTypeGroups: [group]);
@@ -241,19 +161,14 @@ class _MyFilesPageState extends State<MyFilesPage> {
     try {
       await controller.ensurePdfLibraryLoaded();
       await controller.addWorkspaceFileFromPath(file.path);
-      if (!context.mounted) {
-        return;
+      await controller.waitForPendingPdfPersistence();
+      if (context.mounted) {
+        _snack('已导入到本机文件库');
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('已导入到本机文件库')));
     } catch (error) {
-      if (!context.mounted) {
-        return;
+      if (context.mounted) {
+        _snack('$error');
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('$error')));
     }
   }
 
@@ -270,15 +185,20 @@ class _MyFilesPageState extends State<MyFilesPage> {
     if (title == null || title.isEmpty || !context.mounted) {
       return;
     }
-    final message = controller.renameLocalPdfDocument(document.id, title);
-    if (message != null) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text(message)));
-    } else {
-      setState(() {
-        _selectedLocal = document.copyWith(title: title);
-      });
+    try {
+      final message = await controller.renameLocalPdfDocument(
+        document.id,
+        title,
+      );
+      if (message != null) {
+        _snack(message);
+      } else {
+        setState(
+          () => _selectedLocal = controller.pdfDocumentById(document.id),
+        );
+      }
+    } catch (error) {
+      _snack('$error');
     }
   }
 
@@ -295,113 +215,47 @@ class _MyFilesPageState extends State<MyFilesPage> {
     if (!confirmed || !context.mounted) {
       return;
     }
-    final message = controller.deletePdfDocument(document.id);
-    setState(() {
-      if (_selectedLocal?.id == document.id) {
-        _selectedLocal = null;
-      }
-    });
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
-  }
-
-  Future<void> _saveToCloud(
-    BuildContext context,
-    ResearchLifeController controller,
-    String documentId,
-  ) async {
-    final doc = controller.pdfDocumentById(documentId);
-    if (doc == null) {
-      return;
-    }
-    await controller.refreshCloudFiles(reconcile: false);
-    if (!context.mounted) {
-      return;
-    }
-    final folder = await showMoveTargetFolderDialog(
-      context,
-      entries: controller.cloudFileEntries,
-      movingEntry: CloudFileEntry(
-        serverId: -1,
-        clientId: 'upload',
-        title: doc.title,
-        entryType: 'file',
-      ),
-    );
-    if (folder == null || !context.mounted) {
-      return;
-    }
-    final message = await controller.uploadLocalDocumentToCloud(
-      documentId: documentId,
-      parentId: folder.serverId,
-    );
-    if (!context.mounted) {
-      return;
-    }
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message ?? '已上传到「${folder.title}」')));
-  }
-
-  Future<void> _openCloudFile(
-    BuildContext context,
-    ResearchLifeController controller,
-    CloudFileEntry entry,
-  ) async {
     try {
-      final kind = WorkspaceFileKind.fromPath(entry.title);
-      if (kind.isPdf) {
-        await controller.prepareCloudFileForReading(entry);
-        if (!context.mounted) {
-          return;
-        }
-        controller.requestOpenReading(cloudServerId: entry.serverId);
-      } else if (kind.isViewable) {
-        await controller.prepareCloudFileForView(entry);
-        if (!context.mounted) {
-          return;
-        }
-        controller.requestOpenDocumentView(cloudServerId: entry.serverId);
-      } else {
-        await controller.moveCloudEntryToLocal(entry);
-        if (!context.mounted) {
-          return;
-        }
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('《${entry.title}》已下载到本机')));
-      }
+      final message = await controller.deletePdfDocument(document.id);
+      setState(() => _selectedLocal = null);
+      _snack(message);
     } catch (error) {
-      if (!context.mounted) {
-        return;
-      }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('打开失败：$error')));
+      _snack('$error');
     }
   }
 
-  Future<void> _moveCloudToLocal(
+  Future<void> _renameLocalFolder(
     BuildContext context,
     ResearchLifeController controller,
-    CloudFileEntry entry,
+    PdfLibraryDocument document,
   ) async {
+    final folder = Directory(document.path).parent;
+    final name = await showCloudNameDialog(
+      context,
+      title: '重命名文件夹',
+      initialValue: p.basename(folder.path),
+      hint: '文件夹名称',
+    );
+    if (name == null || name.isEmpty || !context.mounted) {
+      return;
+    }
     try {
-      await controller.moveCloudEntryToLocal(entry);
+      final message = await controller.renameLocalFolder(folder.path, name);
       if (!context.mounted) {
         return;
       }
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text('《${entry.title}》已移到本地')));
+      setState(() => _selectedLocal = controller.pdfDocumentById(document.id));
+      _snack(message);
     } catch (error) {
-      if (!context.mounted) {
-        return;
-      }
+      _snack('$error');
+    }
+  }
+
+  void _snack(String message) {
+    if (mounted) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('移到本地失败：$error')));
+      ).showSnackBar(SnackBar(content: Text(message)));
     }
   }
 }
@@ -409,23 +263,19 @@ class _MyFilesPageState extends State<MyFilesPage> {
 class _LocalToolbar extends StatelessWidget {
   const _LocalToolbar({
     required this.selected,
-    required this.guest,
-    required this.cloudSync,
     required this.onImport,
     this.onRename,
+    this.onRenameFolder,
     this.onDelete,
-    this.onSaveCloud,
     this.onOpen,
     this.onPdfTools,
   });
 
   final PdfLibraryDocument? selected;
-  final bool guest;
-  final bool cloudSync;
   final VoidCallback onImport;
   final VoidCallback? onRename;
+  final VoidCallback? onRenameFolder;
   final VoidCallback? onDelete;
-  final VoidCallback? onSaveCloud;
   final VoidCallback? onOpen;
   final VoidCallback? onPdfTools;
 
@@ -434,12 +284,6 @@ class _LocalToolbar extends StatelessWidget {
     final canOpen =
         selected != null &&
         (selected!.fileKind.isPdf || selected!.fileKind.isViewable);
-    final openLabel = selected == null
-        ? '打开'
-        : selected!.fileKind.isPdf
-        ? 'PDF 阅读'
-        : '文档查阅';
-
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
       child: Wrap(
@@ -452,25 +296,24 @@ class _LocalToolbar extends StatelessWidget {
             label: const Text('导入'),
           ),
           TextButton.icon(
-            onPressed: selected != null ? onRename : null,
+            onPressed: onRename,
             icon: const Icon(Icons.drive_file_rename_outline, size: 18),
             label: const Text('重命名'),
           ),
           TextButton.icon(
-            onPressed: selected != null ? onDelete : null,
+            onPressed: onRenameFolder,
+            icon: const Icon(Icons.folder_copy_outlined, size: 18),
+            label: const Text('重命名文件夹'),
+          ),
+          TextButton.icon(
+            onPressed: onDelete,
             icon: const Icon(Icons.delete_outline, size: 18),
             label: const Text('删除'),
           ),
-          if (!guest && cloudSync)
-            TextButton.icon(
-              onPressed: selected != null ? onSaveCloud : null,
-              icon: const Icon(Icons.cloud_upload_outlined, size: 18),
-              label: const Text('上传云端'),
-            ),
           TextButton.icon(
             onPressed: canOpen ? onOpen : null,
             icon: const Icon(Icons.open_in_new, size: 18),
-            label: Text(openLabel),
+            label: const Text('打开'),
           ),
           if (selected?.fileKind.isPdf == true)
             TextButton.icon(
@@ -489,13 +332,13 @@ class _FilePanel extends StatelessWidget {
     required this.title,
     required this.subtitle,
     required this.child,
-    this.toolbar,
+    required this.toolbar,
   });
 
   final String title;
   final String subtitle;
   final Widget child;
-  final Widget? toolbar;
+  final Widget toolbar;
 
   @override
   Widget build(BuildContext context) {
@@ -529,7 +372,7 @@ class _FilePanel extends StatelessWidget {
               ],
             ),
           ),
-          ?toolbar,
+          toolbar,
           const Divider(height: 1),
           Expanded(
             child: Padding(padding: const EdgeInsets.all(8), child: child),
@@ -547,12 +390,6 @@ class _EmptyHint extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Text(
-        message,
-        style: Theme.of(context).textTheme.bodyMedium,
-        textAlign: TextAlign.center,
-      ),
-    );
+    return Center(child: Text(message, textAlign: TextAlign.center));
   }
 }
