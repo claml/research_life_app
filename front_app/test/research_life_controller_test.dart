@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -7,15 +8,19 @@ import 'package:research_life/core/models/app_models.dart';
 import 'package:research_life/services/analysis/analysis_engine_coordinator.dart';
 import 'package:research_life/services/analysis/analysis_service.dart';
 import 'package:research_life/services/calendar/institution_calendar_service.dart';
-import 'package:research_life/services/database/app_database.dart';
+import 'package:research_life/services/database/app_database.dart'
+    hide PdfLibraryDocument;
 import 'package:research_life/services/database/repositories/campus_places_repository.dart';
 import 'package:research_life/services/database/repositories/manual_events_repository.dart';
+import 'package:research_life/services/database/repositories/pdf_documents_repository.dart';
 import 'package:research_life/services/database/repositories/preferences_repository.dart';
 import 'package:research_life/services/database/repositories/sessions_repository.dart';
 import 'package:research_life/services/database/repositories/todo_status_repository.dart';
 import 'package:research_life/services/import/import_service.dart';
 import 'package:research_life/services/review/review_service.dart';
 import 'package:research_life/services/storage/local_workspace_service.dart';
+import 'package:research_life/services/storage/local_file_library_store.dart';
+import 'package:research_life/services/storage/local_data_operation_coordinator.dart';
 import 'package:research_life/state/research_life_controller.dart';
 
 void main() {
@@ -145,8 +150,8 @@ void main() {
       await controller.analyzeCurrentInput();
 
       expect(remoteCalled, isFalse);
+      expect(controller.currentDraft, isNotNull);
       expect(controller.currentDraft?.id, isNot('controller_llm_draft'));
-      expect(controller.currentPreview?.summary, isNot('远程模型分析完成。'));
     });
 
     test('loads an existing weekly analysis upload for editing', () async {
@@ -654,6 +659,66 @@ TITLE: 测试大学 2026 学年校历
       expect(secondController.calendarEvents, hasLength(1));
     });
 
+    test(
+      'deletes a manual event only after local persistence succeeds',
+      () async {
+        final tempDir = await Directory.systemTemp.createTemp(
+          'research_life_controller_manual_event_delete_test',
+        );
+        addTearDown(() => tempDir.delete(recursive: true));
+        final database = AppDatabase(NativeDatabase.memory());
+        addTearDown(database.close);
+        final manualEventsRepository = ManualEventsRepository(database);
+        final todoStatusRepository = TodoStatusRepository(database);
+        final controller = ResearchLifeController(
+          importService: const ImportService(),
+          analysisService: const AnalysisService(),
+          reviewService: const ReviewService(),
+          institutionCalendarService: const InstitutionCalendarService(),
+          localWorkspaceService: LocalWorkspaceService(
+            storageDirectoryResolver: () async => tempDir,
+          ),
+          manualEventsRepository: manualEventsRepository,
+          todoStatusRepository: todoStatusRepository,
+        );
+        addTearDown(controller.dispose);
+
+        controller.addManualEvent(
+          date: DateTime(2026, 4, 27),
+          title: '删除这条待办',
+          category: ItemCategory.work,
+          type: EventType.plan,
+        );
+        await controller.waitForPendingManualEventPersistence();
+        final eventId = controller.manualEvents.single.id;
+        await controller.setTodoPriority(eventId, TodoPriority.high);
+        await controller.waitForPendingTodoStatusPersistence();
+
+        final message = await controller.deleteManualEvent(eventId);
+
+        expect(message, '已删除记录。');
+        expect(controller.manualEvents, isEmpty);
+        expect(controller.todoEvents, isEmpty);
+        expect(await manualEventsRepository.loadManualEvents(), isEmpty);
+        expect(await todoStatusRepository.loadAll(), isNot(contains(eventId)));
+      },
+    );
+
+    test('refuses to delete imported calendar events', () async {
+      final controller = await _createController();
+      controller.importInstitutionCalendar('''
+CALENDAR_IMPORT_V1
+TITLE: 测试大学 2026 学年校历
+2026-03-02 | 2026-07-10 | 春季学期 | study | plan
+''');
+      final importedId = controller.institutionCalendarEvents.single.id;
+
+      final message = await controller.deleteManualEvent(importedId);
+
+      expect(message, '该记录不允许删除。');
+      expect(controller.institutionCalendarEvents.single.id, importedId);
+    });
+
     test('seeds default campus places only once', () async {
       final tempDir = await Directory.systemTemp.createTemp(
         'research_life_controller_campus_places_seed_test',
@@ -807,7 +872,7 @@ TITLE: 测试大学 2026 学年校历
     );
 
     test(
-      'does not persist legacy remote LLM settings in local-only mode',
+      'does not persist remote LLM credentials in local-only mode',
       () async {
         final tempDir = await Directory.systemTemp.createTemp(
           'research_life_controller_remote_llm_settings_test',
@@ -1120,8 +1185,8 @@ TITLE: 测试大学 2026 学年校历
 
       final stored = await preferencesRepository.loadGlassSettings();
       expect(stored, isNotNull);
-      expect(jsonDecode(stored!)['blurSigma'], 20);
-      expect(jsonDecode(stored!)['noiseEnabled'], isFalse);
+      expect(jsonDecode(stored)['blurSigma'], 20);
+      expect(jsonDecode(stored)['noiseEnabled'], isFalse);
 
       final secondController = createController();
       await secondController.ensureGlassSettingsLoaded();
@@ -1326,7 +1391,434 @@ TITLE: 测试大学 2026 学年校历
         expect(requested, greaterThan(0));
       },
     );
+
+    test(
+      'renaming a managed file renames its bytes and persisted path',
+      () async {
+        final fixture = await _createManagedFileController();
+        final source = File(
+          '${fixture.root.path}${Platform.pathSeparator}draft.md',
+        );
+        await source.writeAsString('# draft');
+        final document = await fixture.controller.addWorkspaceFileFromPath(
+          source.path,
+        );
+        await fixture.controller.waitForPendingPdfPersistence();
+
+        final message = await fixture.controller.renameLocalPdfDocument(
+          document.id,
+          'final notes',
+        );
+
+        expect(message, isNull);
+        final renamed = fixture.controller.pdfDocumentById(document.id)!;
+        expect(renamed.title, 'final notes');
+        expect(renamed.path, endsWith('final notes.md'));
+        expect(await File(renamed.path).readAsString(), '# draft');
+        expect(await File(document.path).exists(), isFalse);
+        final persisted = await fixture.store.findById(document.id);
+        expect(persisted?.path, renamed.path);
+      },
+    );
+
+    test(
+      'deleting a managed file removes bytes only after persistence succeeds',
+      () async {
+        final fixture = await _createManagedFileController();
+        final source = File(
+          '${fixture.root.path}${Platform.pathSeparator}obsolete.txt',
+        );
+        await source.writeAsString('obsolete');
+        final document = await fixture.controller.addWorkspaceFileFromPath(
+          source.path,
+        );
+        await fixture.controller.waitForPendingPdfPersistence();
+
+        final message = await fixture.controller.deletePdfDocument(document.id);
+
+        expect(message, contains('已删除'));
+        expect(await File(document.path).exists(), isFalse);
+        expect(fixture.controller.pdfDocumentById(document.id), isNull);
+        expect((await fixture.store.findById(document.id))?.isDeleted, isTrue);
+      },
+    );
+
+    test(
+      'rename rolls the file back when manifest persistence fails',
+      () async {
+        final fixture = await _createManagedFileController();
+        final source = File(
+          '${fixture.root.path}${Platform.pathSeparator}safe.md',
+        );
+        await source.writeAsString('keep me');
+        final document = await fixture.controller.addWorkspaceFileFromPath(
+          source.path,
+        );
+        await fixture.controller.waitForPendingPdfPersistence();
+        fixture.repository.failSave = true;
+
+        await expectLater(
+          fixture.controller.renameLocalPdfDocument(document.id, 'broken'),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(await File(document.path).readAsString(), 'keep me');
+        expect(
+          fixture.controller.pdfDocumentById(document.id)?.path,
+          document.path,
+        );
+      },
+    );
+
+    test(
+      'delete restores staged bytes when manifest persistence fails',
+      () async {
+        final fixture = await _createManagedFileController();
+        final source = File(
+          '${fixture.root.path}${Platform.pathSeparator}safe.txt',
+        );
+        await source.writeAsString('keep me');
+        final document = await fixture.controller.addWorkspaceFileFromPath(
+          source.path,
+        );
+        await fixture.controller.waitForPendingPdfPersistence();
+        fixture.repository.failDelete = true;
+
+        await expectLater(
+          fixture.controller.deletePdfDocument(document.id),
+          throwsA(isA<StateError>()),
+        );
+
+        expect(await File(document.path).readAsString(), 'keep me');
+        expect(fixture.controller.pdfDocumentById(document.id), isNotNull);
+      },
+    );
+
+    test('failed import removes the newly copied managed payload', () async {
+      final fixture = await _createManagedFileController();
+      final source = File(
+        '${fixture.root.path}${Platform.pathSeparator}failed.md',
+      );
+      await source.writeAsString('do not orphan');
+      fixture.repository.failSave = true;
+
+      await expectLater(
+        fixture.controller.addWorkspaceFileFromPath(source.path),
+        throwsA(isA<StateError>()),
+      );
+
+      final payloads = await fixture.workspace
+          .resolveManagedFilePayloadsDirectory();
+      expect(
+        await payloads
+            .list(recursive: true)
+            .where((entity) => entity is File)
+            .isEmpty,
+        isTrue,
+      );
+      expect(fixture.controller.localMaterializedDocuments, isEmpty);
+    });
+
+    test(
+      'flush waits for an active managed-file persistence operation',
+      () async {
+        final fixture = await _createManagedFileController();
+        final source = File(
+          '${fixture.root.path}${Platform.pathSeparator}wait.md',
+        );
+        await source.writeAsString('wait');
+        fixture.repository.saveGate = Completer<void>();
+
+        final import = fixture.controller.addWorkspaceFileFromPath(source.path);
+        await Future<void>.delayed(Duration.zero);
+        var flushCompleted = false;
+        final flush = fixture.controller.flushLocalPersistence().whenComplete(
+          () => flushCompleted = true,
+        );
+        await Future<void>.delayed(Duration.zero);
+        expect(flushCompleted, isFalse);
+
+        fixture.repository.saveGate!.complete();
+        await import;
+        await flush;
+        expect(flushCompleted, isTrue);
+      },
+    );
+
+    test('rename journal spans the file and manifest commit', () async {
+      final fixture = await _createManagedFileController();
+      final source = File(
+        '${fixture.root.path}${Platform.pathSeparator}journal.md',
+      );
+      await source.writeAsString('journal');
+      final document = await fixture.controller.addWorkspaceFileFromPath(
+        source.path,
+      );
+      await fixture.controller.waitForPendingPdfPersistence();
+      fixture.repository.saveGate = Completer<void>();
+      fixture.repository.saveStarted = Completer<void>();
+
+      final rename = fixture.controller.renameLocalPdfDocument(
+        document.id,
+        'committed',
+      );
+      await fixture.repository.saveStarted!.future;
+      final journal = await fixture.workspace
+          .resolveManagedFileOperationJournalFile();
+      expect(await journal.exists(), isTrue);
+      final contents = jsonDecode(await journal.readAsString()) as Map;
+      expect(contents['type'], 'rename');
+      expect(contents['documentId'], document.id);
+
+      fixture.repository.saveGate!.complete();
+      await rename;
+      expect(await journal.exists(), isFalse);
+    });
+
+    test('stale controller delete uses the peer-renamed payload', () async {
+      final fixture = await _createManagedFileController();
+      final source = File(
+        '${fixture.root.path}${Platform.pathSeparator}peer.pdf',
+      );
+      await source.writeAsBytes([1, 2, 3]);
+      final document = await fixture.controller.addWorkspaceFileFromPath(
+        source.path,
+      );
+      await fixture.controller.waitForPendingPdfPersistence();
+      final peerFile = await fixture.workspace.renameManagedFile(
+        File(document.path),
+        'peer-renamed',
+      );
+      await fixture.store.saveDocument(
+        document.copyWith(title: 'peer-renamed', path: peerFile.path),
+      );
+
+      await fixture.controller.deletePdfDocument(document.id);
+
+      expect(await peerFile.exists(), isFalse);
+      expect((await fixture.store.findById(document.id))?.isDeleted, isTrue);
+    });
+
+    test(
+      'delete double failure leaves its journal for startup recovery',
+      () async {
+        final fixture = await _createManagedFileController(
+          workspaceFactory: (root) => _FailingStagedDeleteWorkspace(
+            storageDirectoryResolver: () async => root,
+          ),
+        );
+        final source = File(
+          '${fixture.root.path}${Platform.pathSeparator}recover.pdf',
+        );
+        await source.writeAsBytes([4, 5, 6]);
+        final document = await fixture.controller.addWorkspaceFileFromPath(
+          source.path,
+        );
+        await fixture.controller.waitForPendingPdfPersistence();
+        fixture.repository.failCompensatingSaveAfterDelete = true;
+
+        await expectLater(
+          fixture.controller.deletePdfDocument(document.id),
+          throwsA(anything),
+        );
+
+        final journal = await fixture.workspace
+            .resolveManagedFileOperationJournalFile();
+        expect(await journal.exists(), isTrue);
+        expect(fixture.controller.pdfDocumentById(document.id), isNull);
+        final reopened = LocalFileLibraryStore(fixture.workspace);
+        expect(await reopened.loadDocuments(), isEmpty);
+        expect(await journal.exists(), isFalse);
+      },
+    );
+
+    test(
+      'rename cleanup failure keeps the committed target recoverable',
+      () async {
+        final fixture = await _createManagedFileController(
+          workspaceFactory: (root) => _FailingJournalClearWorkspace(
+            storageDirectoryResolver: () async => root,
+          ),
+        );
+        final source = File(
+          '${fixture.root.path}${Platform.pathSeparator}rename-cleanup.md',
+        );
+        await source.writeAsString('committed rename');
+        final document = await fixture.controller.addWorkspaceFileFromPath(
+          source.path,
+        );
+        await fixture.controller.waitForPendingPdfPersistence();
+
+        final message = await fixture.controller.renameLocalPdfDocument(
+          document.id,
+          'renamed-cleanup',
+        );
+
+        expect(message, isNull);
+        final renamed = fixture.controller.pdfDocumentById(document.id)!;
+        expect(await File(document.path).exists(), isFalse);
+        expect(await File(renamed.path).readAsString(), 'committed rename');
+        final journal = await fixture.workspace
+            .resolveManagedFileOperationJournalFile();
+        expect(await journal.exists(), isTrue);
+
+        final recoveryWorkspace = LocalWorkspaceService(
+          storageDirectoryResolver: () async => fixture.root,
+        );
+        final recovered = await LocalFileLibraryStore(
+          recoveryWorkspace,
+        ).loadDocuments();
+        expect(recovered.single.path, renamed.path);
+        expect(await journal.exists(), isFalse);
+      },
+    );
+
+    test(
+      'delete cleanup failure keeps the committed tombstone recoverable',
+      () async {
+        final fixture = await _createManagedFileController(
+          workspaceFactory: (root) => _FailingJournalClearWorkspace(
+            storageDirectoryResolver: () async => root,
+          ),
+        );
+        final source = File(
+          '${fixture.root.path}${Platform.pathSeparator}delete-cleanup.pdf',
+        );
+        await source.writeAsBytes([4, 5, 6]);
+        final document = await fixture.controller.addWorkspaceFileFromPath(
+          source.path,
+        );
+        await fixture.controller.waitForPendingPdfPersistence();
+
+        await fixture.controller.deletePdfDocument(document.id);
+
+        expect(fixture.controller.pdfDocumentById(document.id), isNull);
+        expect(await File(document.path).exists(), isFalse);
+        final journal = await fixture.workspace
+            .resolveManagedFileOperationJournalFile();
+        expect(await journal.exists(), isTrue);
+
+        final recoveryWorkspace = LocalWorkspaceService(
+          storageDirectoryResolver: () async => fixture.root,
+        );
+        final recovered = await LocalFileLibraryStore(
+          recoveryWorkspace,
+        ).loadDocuments();
+        expect(recovered, isEmpty);
+        expect(await journal.exists(), isFalse);
+      },
+    );
   });
+}
+
+Future<
+  ({
+    ResearchLifeController controller,
+    LocalFileLibraryStore store,
+    _ControllablePdfDocumentsRepository repository,
+    LocalWorkspaceService workspace,
+    Directory root,
+  })
+>
+_createManagedFileController({
+  LocalWorkspaceService Function(Directory root)? workspaceFactory,
+}) async {
+  final root = await Directory.systemTemp.createTemp(
+    'research_life_managed_controller',
+  );
+  addTearDown(() => root.delete(recursive: true));
+  final database = AppDatabase(NativeDatabase.memory());
+  addTearDown(database.close);
+  final workspace =
+      workspaceFactory?.call(root) ??
+      LocalWorkspaceService(storageDirectoryResolver: () async => root);
+  final coordinator = LocalDataOperationCoordinator();
+  final store = LocalFileLibraryStore(
+    workspace,
+    operationCoordinator: coordinator,
+  );
+  final repository = _ControllablePdfDocumentsRepository(
+    database,
+    localStore: store,
+  );
+  final controller = ResearchLifeController(
+    importService: const ImportService(),
+    analysisService: const AnalysisService(),
+    reviewService: const ReviewService(),
+    institutionCalendarService: const InstitutionCalendarService(),
+    localWorkspaceService: workspace,
+    pdfDocumentsRepository: repository,
+    localDataOperationCoordinator: coordinator,
+  );
+  addTearDown(controller.dispose);
+  return (
+    controller: controller,
+    store: store,
+    repository: repository,
+    workspace: workspace,
+    root: root,
+  );
+}
+
+class _ControllablePdfDocumentsRepository extends PdfDocumentsRepository {
+  _ControllablePdfDocumentsRepository(
+    super.database, {
+    required super.localStore,
+  });
+
+  bool failSave = false;
+  bool failDelete = false;
+  bool failCompensatingSaveAfterDelete = false;
+  Completer<void>? saveGate;
+  Completer<void>? saveStarted;
+
+  @override
+  Future<void> saveDocument(
+    PdfLibraryDocument document, {
+    String operation = 'upsert',
+  }) async {
+    if (failSave) {
+      throw StateError('simulated save failure');
+    }
+    if (saveStarted != null && !saveStarted!.isCompleted) {
+      saveStarted!.complete();
+    }
+    await saveGate?.future;
+    return super.saveDocument(document, operation: operation);
+  }
+
+  @override
+  Future<void> deleteDocument(String id) {
+    if (failDelete) {
+      throw StateError('simulated delete failure');
+    }
+    if (!failCompensatingSaveAfterDelete) {
+      return super.deleteDocument(id);
+    }
+    return super.deleteDocument(id).whenComplete(() => failSave = true);
+  }
+}
+
+class _FailingStagedDeleteWorkspace extends LocalWorkspaceService {
+  const _FailingStagedDeleteWorkspace({
+    required super.storageDirectoryResolver,
+  });
+
+  @override
+  Future<void> deleteManagedStagedFile(File staged) {
+    throw const FileSystemException('simulated staged delete failure');
+  }
+}
+
+class _FailingJournalClearWorkspace extends LocalWorkspaceService {
+  const _FailingJournalClearWorkspace({
+    required super.storageDirectoryResolver,
+  });
+
+  @override
+  Future<void> clearManagedFileOperationJournal() {
+    throw const FileSystemException('simulated journal cleanup failure');
+  }
 }
 
 Future<ResearchLifeController> _createController({
