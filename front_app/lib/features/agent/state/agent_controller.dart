@@ -84,7 +84,8 @@ class AgentController extends ChangeNotifier {
     try {
       final loadedProfile = await _profiles.loadActive();
       final credentialAvailable =
-          loadedProfile != null && await _credentials.has(loadedProfile.id);
+          loadedProfile != null &&
+          await _hasCredentialFor(loadedProfile, migrateLegacy: true);
       final loadedSessions = await _chats.listSessions();
       final firstSession = loadedSessions.firstOrNull;
       final loadedMessages = firstSession == null
@@ -148,7 +149,9 @@ class AgentController extends ChangeNotifier {
 
     try {
       previousProfile = await _profiles.loadActive();
-      previousTargetCredential = await _credentials.read(profile.id);
+      previousTargetCredential = await _credentials.read(
+        aiCredentialId(profile),
+      );
     } on Object {
       await _reloadConfiguration(
         fallbackProfile: previousMemoryProfile,
@@ -167,14 +170,19 @@ class AgentController extends ChangeNotifier {
       final trimmedCredential = credential.trim();
       if (trimmedCredential.isNotEmpty) {
         credentialMayHaveChanged = true;
-        await _credentials.write(profile.id, trimmedCredential);
+        await _credentials.write(aiCredentialId(profile), trimmedCredential);
       }
-      final credentialAvailable = await _credentials.has(profile.id);
+      final credentialAvailable = await _credentials.has(
+        aiCredentialId(profile),
+      );
       this.profile = profile;
       hasCredential = credentialAvailable;
     } on Object {
       if (credentialMayHaveChanged) {
-        await _restoreCredential(profile.id, previousTargetCredential);
+        await _restoreCredential(
+          aiCredentialId(profile),
+          previousTargetCredential,
+        );
       }
       if (profileMayHaveChanged) {
         await _restoreProfile(previousProfile);
@@ -194,7 +202,17 @@ class AgentController extends ChangeNotifier {
     error = null;
     _notify();
     try {
-      await _credentials.delete(activeProfile.id);
+      final identity = aiCredentialId(activeProfile);
+      final legacyOwner = await _credentials.read(
+        _legacyCredentialOwnerId(activeProfile),
+      );
+      if (legacyOwner == identity) {
+        await _credentials.delete(activeProfile.id);
+      }
+      await _credentials.delete(identity);
+      if (legacyOwner == identity) {
+        await _credentials.delete(_legacyCredentialOwnerId(activeProfile));
+      }
       hasCredential = false;
     } on Object {
       error = '无法删除 AI 凭据。';
@@ -418,7 +436,7 @@ class AgentController extends ChangeNotifier {
     }
 
     try {
-      final credential = await _credentials.read(activeProfile.id);
+      final credential = await _credentials.read(aiCredentialId(activeProfile));
       if (_operationStopped(operation)) return null;
       final trimmedCredential = credential?.trim();
       hasCredential = trimmedCredential != null && trimmedCredential.isNotEmpty;
@@ -654,7 +672,7 @@ class AgentController extends ChangeNotifier {
   }) async {
     try {
       final loaded = await _profiles.loadActive();
-      final available = loaded != null && await _credentials.has(loaded.id);
+      final available = loaded != null && await _hasCredentialFor(loaded);
       profile = loaded;
       hasCredential = available;
     } on Object {
@@ -662,6 +680,33 @@ class AgentController extends ChangeNotifier {
       hasCredential = fallbackHasCredential;
     }
   }
+
+  Future<bool> _hasCredentialFor(
+    AiProviderProfile activeProfile, {
+    bool migrateLegacy = false,
+  }) async {
+    final identity = aiCredentialId(activeProfile);
+    final identityAvailable = await _credentials.has(identity);
+    if (!migrateLegacy) return identityAvailable;
+
+    // Legacy releases used the profile id (normally `primary`) as one shared
+    // slot. It is only interpreted for the profile currently persisted at
+    // migration time. A non-secret owner marker is written first, making a
+    // partial migration fail closed even if a later Windows operation fails.
+    final ownerId = _legacyCredentialOwnerId(activeProfile);
+    final owner = await _credentials.read(ownerId);
+    if (owner != null && owner != identity) return identityAvailable;
+    final legacy = await _credentials.read(activeProfile.id);
+    final trimmed = legacy?.trim();
+    if (trimmed == null || trimmed.isEmpty) return identityAvailable;
+    if (owner == null) await _credentials.write(ownerId, identity);
+    if (!identityAvailable) await _credentials.write(identity, trimmed);
+    await _credentials.delete(activeProfile.id);
+    return true;
+  }
+
+  String _legacyCredentialOwnerId(AiProviderProfile activeProfile) =>
+      '${activeProfile.id}--legacy-owner';
 
   _AgentOperation _beginOperation() {
     final operation = _AgentOperation(++_nextOperationId);

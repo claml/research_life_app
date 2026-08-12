@@ -413,7 +413,10 @@ void main() {
       );
 
       expect(await fixture.profiles.loadActive(), remoteProfile);
-      expect(await fixture.credentials.read(remoteProfile.id), 'old-key');
+      expect(
+        await fixture.credentials.read(aiCredentialId(remoteProfile)),
+        'old-key',
+      );
       expect(fixture.controller.profile, remoteProfile);
       expect(fixture.controller.hasCredential, isTrue);
       expect(fixture.controller.error, isNotNull);
@@ -433,7 +436,10 @@ void main() {
       );
 
       expect(await fixture.profiles.loadActive(), remoteProfile);
-      expect(await fixture.credentials.read(remoteProfile.id), 'old-key');
+      expect(
+        await fixture.credentials.read(aiCredentialId(remoteProfile)),
+        'old-key',
+      );
       expect(fixture.controller.profile, remoteProfile);
       expect(fixture.controller.hasCredential, isTrue);
       expect(fixture.controller.error, isNotNull);
@@ -451,7 +457,10 @@ void main() {
     );
 
     expect(await fixture.profiles.loadActive(), remoteProfile);
-    expect(await fixture.credentials.read(remoteProfile.id), 'old-key');
+    expect(
+      await fixture.credentials.read(aiCredentialId(remoteProfile)),
+      'old-key',
+    );
     expect(fixture.controller.profile, remoteProfile);
     expect(fixture.controller.hasCredential, isTrue);
     expect(fixture.controller.error, isNotNull);
@@ -629,12 +638,84 @@ void main() {
     );
 
     expect(
-      await fixture.credentials.read(replacementProfile.id),
+      await fixture.credentials.read(aiCredentialId(replacementProfile)),
       'existing-key',
     );
     expect(await fixture.profiles.loadActive(), replacementProfile);
     expect(fixture.controller.hasCredential, isTrue);
   });
+
+  test(
+    'provider credentials are isolated and restored when switching back',
+    () async {
+      await fixture.storeConfiguration(credential: 'openai-only-key');
+      await fixture.controller.bootstrap();
+      const deepSeek = AiProviderProfile(
+        id: 'primary',
+        provider: 'deepseek',
+        displayName: 'DeepSeek',
+        baseUrl: 'https://api.deepseek.com',
+        model: 'deepseek-chat',
+        requiresCredential: true,
+      );
+
+      await fixture.controller.saveConfiguration(
+        profile: deepSeek,
+        credential: '',
+      );
+
+      expect(fixture.controller.hasCredential, isFalse);
+      expect(fixture.controller.needsConfiguration, isTrue);
+      fixture.adapter.replyNext('must not be requested');
+      await fixture.controller.sendMessage('do not leak the old key');
+      expect(fixture.adapter.calls, 0);
+
+      await fixture.controller.saveConfiguration(
+        profile: deepSeek,
+        credential: 'deepseek-only-key',
+      );
+      await fixture.controller.sendMessage('use the new provider key');
+      expect(
+        fixture.adapter.authorizationHeaders.single,
+        'Bearer deepseek-only-key',
+      );
+      expect(
+        fixture.adapter.authorizationHeaders.single,
+        isNot(contains('openai-only-key')),
+      );
+
+      await fixture.controller.deleteCredential();
+      expect(await fixture.credentials.read(aiCredentialId(deepSeek)), isNull);
+      expect(
+        await fixture.credentials.read(aiCredentialId(remoteProfile)),
+        'openai-only-key',
+      );
+
+      await fixture.controller.saveConfiguration(
+        profile: remoteProfile,
+        credential: '',
+      );
+      expect(fixture.controller.hasCredential, isTrue);
+      expect(fixture.controller.needsConfiguration, isFalse);
+    },
+  );
+
+  test(
+    'bootstrap migrates the legacy slot only for the persisted provider',
+    () async {
+      await fixture.profiles.saveActive(remoteProfile);
+      await fixture.credentials.write(remoteProfile.id, 'legacy-openai-key');
+
+      await fixture.controller.bootstrap();
+
+      expect(await fixture.credentials.read(remoteProfile.id), isNull);
+      expect(
+        await fixture.credentials.read(aiCredentialId(remoteProfile)),
+        'legacy-openai-key',
+      );
+      expect(fixture.controller.hasCredential, isTrue);
+    },
+  );
 
   test('replacement credential is written without being exposed', () async {
     await fixture.storeConfiguration(credential: 'existing-key');
@@ -645,7 +726,7 @@ void main() {
     );
 
     expect(
-      await fixture.credentials.read(replacementProfile.id),
+      await fixture.credentials.read(aiCredentialId(replacementProfile)),
       'replacement-key',
     );
     expect(fixture.controller.error, isNull);
@@ -662,7 +743,10 @@ void main() {
 
     await fixture.controller.deleteCredential();
 
-    expect(await fixture.credentials.read(remoteProfile.id), isNull);
+    expect(
+      await fixture.credentials.read(aiCredentialId(remoteProfile)),
+      isNull,
+    );
     expect(fixture.controller.needsConfiguration, isTrue);
     expect((await fixture.chats.listSessions()).single.id, session.id);
   });
@@ -722,7 +806,7 @@ final class _Fixture {
 
   Future<void> storeConfiguration({String credential = 'test-key'}) async {
     await profiles.saveActive(remoteProfile);
-    await credentials.write(remoteProfile.id, credential);
+    await credentials.write(aiCredentialId(remoteProfile), credential);
   }
 
   Future<void> closeDatabase() async {
@@ -930,6 +1014,7 @@ typedef _AdapterAction =
 final class _ScriptedAdapter implements HttpClientAdapter {
   final List<_AdapterAction> _actions = <_AdapterAction>[];
   final List<Map<String, Object?>> jsonBodies = <Map<String, Object?>>[];
+  final List<Object?> authorizationHeaders = <Object?>[];
   int calls = 0;
   Completer<void> requestStarted = Completer<void>();
   Completer<ResponseBody>? _blocked;
@@ -978,6 +1063,7 @@ final class _ScriptedAdapter implements HttpClientAdapter {
     Future<void>? cancelFuture,
   ) async {
     calls += 1;
+    authorizationHeaders.add(options.headers['authorization']);
     if (requestStream != null) {
       final bytes = <int>[];
       await for (final chunk in requestStream) {

@@ -8,6 +8,7 @@ import 'package:flutter_markdown/flutter_markdown.dart';
 import '../../app/local_services_scope.dart';
 import '../../core/theme/app_tokens.dart';
 import '../../services/agent/agent_models.dart';
+import '../../services/agent/ai_credential_store.dart';
 import '../../services/agent/ai_profile.dart';
 import 'state/agent_controller.dart';
 
@@ -879,6 +880,22 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
     });
   }
 
+  bool get _selectedIdentityHasCredential {
+    final active = widget.controller.profile;
+    final baseUrl = _baseUrlController.text.trim();
+    if (active == null || baseUrl.isEmpty || !widget.controller.hasCredential) {
+      return false;
+    }
+    final selected = _preset.toProfile(
+      id: active.id,
+      baseUrl: baseUrl,
+      model: _modelController.text.trim().isEmpty
+          ? active.model
+          : _modelController.text.trim(),
+    );
+    return aiCredentialId(active) == aiCredentialId(selected);
+  }
+
   Future<void> _save() async {
     final baseUrl = _baseUrlController.text.trim();
     final model = _modelController.text.trim();
@@ -888,7 +905,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
       return;
     }
     if (_preset.requiresCredential &&
-        !widget.controller.hasCredential &&
+        !_selectedIdentityHasCredential &&
         credential.isEmpty) {
       setState(() => _validationError = '请输入 API Key。');
       return;
@@ -1005,9 +1022,7 @@ class _AgentSettingsDialogState extends State<_AgentSettingsDialog> {
                   labelText: _preset.requiresCredential
                       ? 'API Key'
                       : 'API Key（可选）',
-                  hintText: widget.controller.hasCredential
-                      ? '留空以保留现有凭据'
-                      : null,
+                  hintText: _selectedIdentityHasCredential ? '留空以保留现有凭据' : null,
                   border: const OutlineInputBorder(),
                 ),
               ),

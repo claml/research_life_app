@@ -71,7 +71,10 @@ void main() {
 
     await tester.tap(find.byKey(const Key('agent-save-settings')));
     await tester.pumpAndSettle();
-    expect(await fixture.credentials.read('primary'), 'existing-secret');
+    expect(
+      await fixture.credentials.read(aiCredentialId(_profile)),
+      'existing-secret',
+    );
 
     await tester.tap(find.byKey(const Key('agent-settings')));
     await tester.pumpAndSettle();
@@ -111,6 +114,29 @@ void main() {
     },
   );
 
+  testWidgets('switching credential providers requires that provider key', (
+    tester,
+  ) async {
+    final fixture = _AgentPageFixture(configured: true);
+    await fixture.pump(tester);
+    await tester.tap(find.byKey(const Key('agent-settings')));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('agent-provider')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek').last);
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('agent-save-settings')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('请输入 API Key。'), findsOneWidget);
+    expect(fixture.profiles.active?.provider, 'openai');
+    expect(
+      await fixture.credentials.read(aiCredentialId(_profile)),
+      'existing-secret',
+    );
+  });
+
   testWidgets('credential delete is confirmed without deleting local history', (
     tester,
   ) async {
@@ -126,7 +152,7 @@ void main() {
     await tester.tap(find.text('确认删除'));
     await tester.pumpAndSettle();
 
-    expect(await fixture.credentials.read('primary'), isNull);
+    expect(await fixture.credentials.read(aiCredentialId(_profile)), isNull);
     expect(fixture.chats.sessions, hasLength(1));
     expect(find.text('保留的本地会话'), findsOneWidget);
   });
@@ -328,7 +354,7 @@ final class _AgentPageFixture {
   _AgentPageFixture({bool configured = false}) {
     if (configured) {
       profiles.active = _profile;
-      credentials.values[_profile.id] = 'existing-secret';
+      credentials.values[aiCredentialId(_profile)] = 'existing-secret';
     }
     backupController = LocalBackupController(
       backupService: _UnusedBackupService(),
@@ -456,7 +482,7 @@ final class _DriftAgentPageFixture {
 
   Future<void> configure() async {
     await profiles.saveActive(_profile);
-    await credentials.write(_profile.id, 'existing-secret');
+    await credentials.write(aiCredentialId(_profile), 'existing-secret');
   }
 
   Future<void> pump(WidgetTester tester) async {

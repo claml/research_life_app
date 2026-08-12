@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:research_life/services/agent/ai_credential_store.dart';
+import 'package:research_life/services/agent/ai_profile.dart';
 import 'package:research_life/services/agent/windows_ai_credential_store.dart';
 import 'package:win32/win32.dart';
 
@@ -29,6 +30,45 @@ void main() {
     await store.write('primary', 'secret-value');
 
     expect(await store.has('primary'), isTrue);
+  });
+
+  test('credential identities isolate providers and custom endpoints', () {
+    const openAi = AiProviderProfile(
+      id: 'primary',
+      provider: 'openai',
+      displayName: 'OpenAI',
+      baseUrl: 'https://api.openai.com/v1',
+      model: 'model-a',
+      requiresCredential: true,
+    );
+    const deepSeek = AiProviderProfile(
+      id: 'primary',
+      provider: 'deepseek',
+      displayName: 'DeepSeek',
+      baseUrl: 'https://api.deepseek.com',
+      model: 'model-b',
+      requiresCredential: true,
+    );
+    const customA = AiProviderProfile(
+      id: 'primary',
+      provider: 'custom',
+      displayName: 'Custom',
+      baseUrl: 'https://one.example/v1/',
+      model: 'model-c',
+      requiresCredential: true,
+    );
+    const customB = AiProviderProfile(
+      id: 'primary',
+      provider: 'custom',
+      displayName: 'Custom',
+      baseUrl: 'https://two.example/v1',
+      model: 'model-c',
+      requiresCredential: true,
+    );
+
+    expect(aiCredentialId(openAi), isNot(aiCredentialId(deepSeek)));
+    expect(aiCredentialId(customA), isNot(aiCredentialId(customB)));
+    expect(aiCredentialId(customA), matches(r'^[A-Za-z0-9._-]+$'));
   });
 
   test('rejects blank secrets before calling Windows', () async {
