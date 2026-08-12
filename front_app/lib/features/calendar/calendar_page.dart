@@ -735,6 +735,7 @@ class _CalendarPageState extends State<CalendarPage> {
         initialType: existingEvent?.type ?? EventType.record,
         initialTime: _extractTime(existingEvent),
         isEditing: existingEvent != null,
+        allowDelete: existingEvent?.origin == EventOrigin.manual,
       ),
     );
 
@@ -743,21 +744,62 @@ class _CalendarPageState extends State<CalendarPage> {
     }
 
     final controller = ResearchLifeScope.of(context);
-    final message = existingEvent == null
-        ? controller.addManualEvent(
-            date: date,
-            title: result.title,
-            category: result.category,
-            type: result.type,
-            time: _toDateTime(result.time),
-          )
-        : controller.updateEditableEvent(
-            eventId: existingEvent.id,
-            title: result.title,
-            category: result.category,
-            type: result.type,
-            time: _toDateTime(result.time),
-          );
+    final String message;
+    switch (result) {
+      case _DeleteEventEditorResult():
+        if (existingEvent == null) {
+          return;
+        }
+        final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('删除记录？'),
+            content: Text('确定删除“${existingEvent.title}”吗？'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.of(dialogContext).pop(true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(dialogContext).colorScheme.error,
+                ),
+                child: const Text('确认删除'),
+              ),
+            ],
+          ),
+        );
+        if (confirmed != true || !context.mounted) {
+          return;
+        }
+        message = await controller.deleteManualEvent(existingEvent.id);
+      case _SaveEventEditorResult(
+        :final title,
+        :final category,
+        :final type,
+        :final time,
+      ):
+        message = existingEvent == null
+            ? controller.addManualEvent(
+                date: date,
+                title: title,
+                category: category,
+                type: type,
+                time: _toDateTime(time),
+              )
+            : controller.updateEditableEvent(
+                eventId: existingEvent.id,
+                title: title,
+                category: category,
+                type: type,
+                time: _toDateTime(time),
+              );
+    }
+
+    if (!context.mounted) {
+      return;
+    }
 
     ScaffoldMessenger.of(
       context,
@@ -1329,18 +1371,26 @@ DateTime? _toDateTime(TimeOfDay? time) {
   return DateTime(2000, 1, 1, time.hour, time.minute);
 }
 
-class _EventEditorResult {
-  const _EventEditorResult({
+sealed class _EventEditorResult {
+  const _EventEditorResult();
+}
+
+class _SaveEventEditorResult extends _EventEditorResult {
+  const _SaveEventEditorResult({
     required this.title,
     required this.category,
     required this.type,
     this.time,
-  });
+  }) : super();
 
   final String title;
   final ItemCategory category;
   final EventType type;
   final TimeOfDay? time;
+}
+
+class _DeleteEventEditorResult extends _EventEditorResult {
+  const _DeleteEventEditorResult();
 }
 
 class _EventEditorDialog extends StatefulWidget {
@@ -1351,6 +1401,7 @@ class _EventEditorDialog extends StatefulWidget {
     required this.initialType,
     required this.initialTime,
     required this.isEditing,
+    required this.allowDelete,
   });
 
   final DateTime initialDate;
@@ -1359,6 +1410,7 @@ class _EventEditorDialog extends StatefulWidget {
   final EventType initialType;
   final TimeOfDay? initialTime;
   final bool isEditing;
+  final bool allowDelete;
 
   @override
   State<_EventEditorDialog> createState() => _EventEditorDialogState();
@@ -1478,6 +1530,15 @@ class _EventEditorDialogState extends State<_EventEditorDialog> {
         ),
       ),
       actions: [
+        if (widget.allowDelete)
+          TextButton(
+            onPressed: () =>
+                Navigator.of(context).pop(const _DeleteEventEditorResult()),
+            style: TextButton.styleFrom(
+              foregroundColor: Theme.of(context).colorScheme.error,
+            ),
+            child: const Text('删除'),
+          ),
         TextButton(
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('取消'),
@@ -1485,7 +1546,7 @@ class _EventEditorDialogState extends State<_EventEditorDialog> {
         FilledButton(
           onPressed: () {
             Navigator.of(context).pop(
-              _EventEditorResult(
+              _SaveEventEditorResult(
                 title: _titleController.text.trim(),
                 category: _category,
                 type: _type,
