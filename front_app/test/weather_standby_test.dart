@@ -31,41 +31,39 @@ void main() {
     }
   });
 
-  testWidgets(
-    'weather standby keeps its static image when motion is disabled',
-    (tester) async {
-      tester.view.devicePixelRatio = 1;
-      tester.view.physicalSize = const Size(1180, 760);
-      addTearDown(tester.view.reset);
-      final controller = _createController();
-      addTearDown(controller.dispose);
+  testWidgets('weather standby uses only the dedicated static image', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1180, 760);
+    addTearDown(tester.view.reset);
+    final controller = _createController();
+    addTearDown(controller.dispose);
 
-      await tester.pumpWidget(
-        ResearchLifeScope(
-          controller: controller,
-          child: MaterialApp(theme: AppTheme.light(), home: const HomePage()),
-        ),
-      );
-      await tester.pump();
-      await controller.setWeatherAnimationEnabled(false);
-      await tester.pump();
-
-      final assetImages = tester
-          .widgetList<Image>(find.byType(Image))
-          .map((image) => image.image)
-          .whereType<AssetImage>();
-      expect(
-        assetImages.map((image) => image.assetName),
-        contains('assets/weather/unknown.png'),
-      );
-      expect(
-        tester.getSize(find.byKey(const Key('weather-standby-panel'))).height,
-        lessThan(640),
-      );
-      expect(find.text('研LIFE'), findsOneWidget);
-      expect(tester.takeException(), isNull);
-    },
-  );
+    await tester.pumpWidget(
+      ResearchLifeScope(
+        controller: controller,
+        child: MaterialApp(theme: AppTheme.light(), home: const HomePage()),
+      ),
+    );
+    await tester.pump();
+    final assetImages = tester
+        .widgetList<Image>(find.byType(Image))
+        .map((image) => image.image)
+        .whereType<AssetImage>();
+    expect(
+      assetImages.map((image) => image.assetName),
+      contains('assets/weather/unknown.png'),
+    );
+    expect(
+      tester.getSize(find.byKey(const Key('weather-standby-panel'))).height,
+      lessThan(640),
+    );
+    expect(find.text('研LIFE'), findsOneWidget);
+    expect(find.byIcon(Icons.animation_rounded), findsNothing);
+    expect(find.byIcon(Icons.motion_photos_off_rounded), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
 }
 
 ResearchLifeController _createController() {

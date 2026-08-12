@@ -1,6 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
-
 import 'package:flutter/material.dart';
 
 import '../../app/research_life_scope.dart';
@@ -33,30 +31,16 @@ class HomePage extends StatefulWidget {
   State<HomePage> createState() => _HomePageState();
 }
 
-class _HomePageState extends State<HomePage>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _weatherMotion;
-
+class _HomePageState extends State<HomePage> {
   @override
   void initState() {
     super.initState();
-    _weatherMotion = AnimationController(
-      vsync: this,
-      duration: const Duration(seconds: 18),
-    )..repeat();
-
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
       }
       unawaited(ResearchLifeScope.of(context).ensureWeatherLoaded());
     });
-  }
-
-  @override
-  void dispose() {
-    _weatherMotion.dispose();
-    super.dispose();
   }
 
   @override
@@ -73,8 +57,6 @@ class _HomePageState extends State<HomePage>
         final snapshot = controller.weatherSnapshot;
         final condition = snapshot?.condition ?? WeatherCondition.unknown;
         final isDay = snapshot?.isDay ?? true;
-        final animationsEnabled = controller.weatherAnimationEnabled;
-
         final foreground = <Widget>[
           Positioned(
             left: compact ? 18 : 54,
@@ -101,14 +83,6 @@ class _HomePageState extends State<HomePage>
                 onChooseCity: () => _openCityDialog(controller),
                 onDismissTodo: () => controller.dismissHomeTodoHint(),
               ),
-            ),
-          ),
-          Positioned(
-            right: compact ? 16 : 24,
-            bottom: compact ? 16 : 22,
-            child: _WeatherAnimationToggleButton(
-              enabled: animationsEnabled,
-              onToggle: () => _toggleWeatherAnimations(controller),
             ),
           ),
         ];
@@ -138,29 +112,10 @@ class _HomePageState extends State<HomePage>
                 ),
               ),
             ),
-            if (animationsEnabled)
-              Positioned.fill(
-                child: Opacity(
-                  opacity: 0.34,
-                  child: _WeatherBackdrop(
-                    animation: _weatherMotion,
-                    condition: condition,
-                    isDay: isDay,
-                    reduceMotion: media.disableAnimations,
-                    tokens: tokens,
-                  ),
-                ),
-              ),
             ...foreground,
           ],
         );
       },
-    );
-  }
-
-  Future<void> _toggleWeatherAnimations(ResearchLifeController controller) {
-    return controller.setWeatherAnimationEnabled(
-      !controller.weatherAnimationEnabled,
     );
   }
 
@@ -688,36 +643,6 @@ class _TodoGlassHint extends StatelessWidget {
   }
 }
 
-class _WeatherAnimationToggleButton extends StatelessWidget {
-  const _WeatherAnimationToggleButton({
-    required this.enabled,
-    required this.onToggle,
-  });
-
-  final bool enabled;
-  final VoidCallback onToggle;
-
-  @override
-  Widget build(BuildContext context) {
-    final tokens = context.tokens;
-    return Tooltip(
-      message: enabled ? '关闭天气动画' : '开启天气动画',
-      child: IconButton(
-        onPressed: onToggle,
-        icon: Icon(
-          enabled ? Icons.animation_rounded : Icons.motion_photos_off_rounded,
-          size: 18,
-        ),
-        color: enabled ? tokens.accent : tokens.textMuted,
-        style: IconButton.styleFrom(
-          fixedSize: const Size(38, 38),
-          backgroundColor: tokens.panelSurface.withValues(alpha: 0.65),
-        ),
-      ),
-    );
-  }
-}
-
 class _WeatherCityDialog extends StatefulWidget {
   const _WeatherCityDialog({required this.controller});
 
@@ -897,325 +822,5 @@ class _WeatherCityDialogState extends State<_WeatherCityDialog> {
       return;
     }
     Navigator.of(context).pop(message);
-  }
-}
-
-class _WeatherBackdrop extends StatelessWidget {
-  const _WeatherBackdrop({
-    required this.animation,
-    required this.condition,
-    required this.isDay,
-    required this.reduceMotion,
-    required this.tokens,
-  });
-
-  final Animation<double> animation;
-  final WeatherCondition condition;
-  final bool isDay;
-  final bool reduceMotion;
-  final AppTokens tokens;
-
-  @override
-  Widget build(BuildContext context) {
-    if (reduceMotion) {
-      return CustomPaint(
-        painter: _WeatherPainter(
-          condition: condition,
-          isDay: isDay,
-          progress: 0,
-          tokens: tokens,
-        ),
-      );
-    }
-
-    return AnimatedBuilder(
-      animation: animation,
-      builder: (context, _) {
-        return CustomPaint(
-          painter: _WeatherPainter(
-            condition: condition,
-            isDay: isDay,
-            progress: animation.value,
-            tokens: tokens,
-          ),
-        );
-      },
-    );
-  }
-}
-
-class _WeatherPainter extends CustomPainter {
-  const _WeatherPainter({
-    required this.condition,
-    required this.isDay,
-    required this.progress,
-    required this.tokens,
-  });
-
-  final WeatherCondition condition;
-  final bool isDay;
-  final double progress;
-  final AppTokens tokens;
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    _paintAmbient(canvas, size);
-
-    switch (condition) {
-      case WeatherCondition.clear:
-        _paintClear(canvas, size);
-      case WeatherCondition.cloudy:
-        _paintClouds(canvas, size, opacity: 0.42);
-      case WeatherCondition.fog:
-        _paintFog(canvas, size);
-      case WeatherCondition.dust:
-        _paintClouds(canvas, size, opacity: 0.22);
-        _paintDust(canvas, size);
-      case WeatherCondition.drizzle:
-        _paintClouds(canvas, size, opacity: 0.35);
-        _paintRain(canvas, size, count: 74, intensity: 0.54);
-      case WeatherCondition.rain:
-        _paintClouds(canvas, size, opacity: 0.46);
-        _paintRain(canvas, size, count: 156, intensity: 0.9);
-      case WeatherCondition.snow:
-        _paintClouds(canvas, size, opacity: 0.28);
-        _paintSnow(canvas, size);
-      case WeatherCondition.thunderstorm:
-        _paintClouds(canvas, size, opacity: 0.54);
-        _paintRain(canvas, size, count: 184, intensity: 1);
-        _paintLightning(canvas, size);
-      case WeatherCondition.unknown:
-        _paintClouds(canvas, size, opacity: 0.18);
-    }
-  }
-
-  void _paintAmbient(Canvas canvas, Size size) {
-    final paint = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: [
-          Colors.white.withValues(alpha: isDay ? 0.16 : 0.05),
-          tokens.panelSurface.withValues(alpha: 0),
-        ],
-      ).createShader(Offset.zero & size);
-    canvas.drawRect(Offset.zero & size, paint);
-  }
-
-  void _paintClear(Canvas canvas, Size size) {
-    final center = Offset(size.width * 0.78, size.height * 0.24);
-    final radius = math.min(size.shortestSide * 0.18, 112.0);
-    final pulse = 0.5 + 0.5 * math.sin(progress * math.pi * 2);
-    final glowPaint = Paint()
-      ..shader = RadialGradient(
-        colors: [
-          WeatherPalette.sunCore.withValues(alpha: isDay ? 0.34 : 0.12),
-          WeatherPalette.sunGlow.withValues(alpha: 0),
-        ],
-      ).createShader(Rect.fromCircle(center: center, radius: radius * 2.4));
-    canvas.drawCircle(center, radius * (2.05 + pulse * 0.08), glowPaint);
-
-    final sunPaint = Paint()
-      ..color = (isDay ? WeatherPalette.sunCore : WeatherPalette.moonCore)
-          .withValues(alpha: isDay ? 0.28 : 0.18);
-    canvas.drawCircle(center, radius * 0.52, sunPaint);
-  }
-
-  void _paintClouds(Canvas canvas, Size size, {required double opacity}) {
-    final cloudPaint = Paint()
-      ..color = Colors.white.withValues(alpha: opacity)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 14);
-    final shadowPaint = Paint()
-      ..color = WeatherPalette.cloudShadow.withValues(alpha: opacity * 0.18)
-      ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 20);
-
-    for (var i = 0; i < 5; i++) {
-      final width = size.width * (0.28 + i * 0.025);
-      final height = 52.0 + i * 11;
-      final baseX =
-          ((i * 0.23 + progress * (0.015 + i * 0.004)) % 1.32 - 0.16) *
-          size.width;
-      final y = size.height * (0.1 + i * 0.08);
-      _drawCloud(canvas, Offset(baseX, y), Size(width, height), shadowPaint);
-      _drawCloud(
-        canvas,
-        Offset(baseX - size.width * 0.015, y - 4),
-        Size(width, height),
-        cloudPaint,
-      );
-    }
-  }
-
-  void _drawCloud(Canvas canvas, Offset origin, Size size, Paint paint) {
-    final rect = Rect.fromLTWH(
-      origin.dx,
-      origin.dy + size.height * 0.36,
-      size.width,
-      size.height * 0.42,
-    );
-    canvas.drawRRect(
-      RRect.fromRectAndRadius(rect, Radius.circular(size.height)),
-      paint,
-    );
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: origin + Offset(size.width * 0.28, size.height * 0.38),
-        width: size.width * 0.42,
-        height: size.height * 0.72,
-      ),
-      paint,
-    );
-    canvas.drawOval(
-      Rect.fromCenter(
-        center: origin + Offset(size.width * 0.56, size.height * 0.3),
-        width: size.width * 0.5,
-        height: size.height * 0.86,
-      ),
-      paint,
-    );
-  }
-
-  void _paintRain(
-    Canvas canvas,
-    Size size, {
-    required int count,
-    required double intensity,
-  }) {
-    final random = math.Random(23);
-    final paint = Paint()
-      ..strokeCap = StrokeCap.round
-      ..blendMode = BlendMode.srcOver;
-
-    for (var i = 0; i < count; i++) {
-      final layer = random.nextDouble();
-      final speed = 0.52 + layer * 0.78;
-      final startX = random.nextDouble() * (size.width + 180) - 90;
-      final drift = progress * (60 + layer * 80);
-      final x = (startX + drift) % (size.width + 160) - 80;
-      final y =
-          ((random.nextDouble() + progress * speed) % 1) * (size.height + 170) -
-          92;
-      final length = 17 + layer * 30 * intensity;
-      final slant = 9 + layer * 16;
-
-      paint
-        ..strokeWidth = 0.65 + layer * 1.25
-        ..color = WeatherPalette.rainDrop.withValues(
-          alpha: (0.18 + layer * 0.24) * intensity,
-        );
-      canvas.drawLine(Offset(x, y), Offset(x - slant, y + length), paint);
-    }
-
-    final splashPaint = Paint()
-      ..strokeWidth = 1
-      ..strokeCap = StrokeCap.round
-      ..color = WeatherPalette.rainSplash.withValues(alpha: 0.12 * intensity);
-    for (var i = 0; i < 26; i++) {
-      final seed = i * 37.7;
-      final x = ((seed * 11 + progress * 70) % size.width);
-      final y = size.height * (0.84 + 0.12 * math.sin(seed));
-      canvas.drawLine(Offset(x - 5, y), Offset(x + 5, y - 1.5), splashPaint);
-    }
-  }
-
-  void _paintSnow(Canvas canvas, Size size) {
-    final random = math.Random(61);
-    final paint = Paint()..color = Colors.white.withValues(alpha: 0.72);
-
-    for (var i = 0; i < 94; i++) {
-      final layer = random.nextDouble();
-      final radius = 1.2 + layer * 2.6;
-      final speed = 0.12 + layer * 0.28;
-      final y =
-          ((random.nextDouble() + progress * speed) % 1) * (size.height + 70) -
-          35;
-      final baseX = random.nextDouble() * size.width;
-      final drift = math.sin((progress * math.pi * 2) + i) * (10 + layer * 18);
-      paint.color = Colors.white.withValues(alpha: 0.26 + layer * 0.5);
-      canvas.drawCircle(Offset(baseX + drift, y), radius, paint);
-    }
-  }
-
-  void _paintFog(Canvas canvas, Size size) {
-    final paint = Paint()..color = Colors.white.withValues(alpha: 0.23);
-    for (var i = 0; i < 8; i++) {
-      final y = size.height * (0.16 + i * 0.085);
-      final offset = math.sin(progress * math.pi * 2 + i) * 28;
-      final rect = Rect.fromLTWH(
-        -size.width * 0.12 + offset,
-        y,
-        size.width * 1.24,
-        24 + i * 1.4,
-      );
-      canvas.drawRRect(
-        RRect.fromRectAndRadius(rect, const Radius.circular(999)),
-        paint,
-      );
-    }
-  }
-
-  void _paintDust(Canvas canvas, Size size) {
-    final hazePaint = Paint()
-      ..color = WeatherPalette.dustHaze.withValues(alpha: 0.055);
-    canvas.drawRect(Offset.zero & size, hazePaint);
-
-    final random = math.Random(97);
-    final paint = Paint()..strokeCap = StrokeCap.round;
-
-    for (var i = 0; i < 130; i++) {
-      final layer = random.nextDouble();
-      final speed = 0.55 + layer * 0.7;
-      final startX = random.nextDouble() * (size.width + 220) - 110;
-      final drift = progress * (size.width * (0.3 + speed * 0.6) + 160);
-      final x = (startX + drift) % (size.width + 200) - 100;
-      final y =
-          ((random.nextDouble() + progress * 0.05) % 1) * (size.height + 60) -
-          30;
-      final length = 8 + layer * 22;
-
-      paint
-        ..strokeWidth = 1 + layer * 1.6
-        ..color = WeatherPalette.dustStreak.withValues(
-          alpha: 0.09 + layer * 0.18,
-        );
-      canvas.drawLine(
-        Offset(x, y),
-        Offset(x - length, y + 2 + layer * 5),
-        paint,
-      );
-    }
-  }
-
-  void _paintLightning(Canvas canvas, Size size) {
-    final phase = (progress * 3) % 1;
-    if (phase < 0.84) {
-      return;
-    }
-
-    final opacity = (1 - ((phase - 0.84) / 0.16)).clamp(0.0, 1.0);
-    final flashPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.16 * opacity);
-    canvas.drawRect(Offset.zero & size, flashPaint);
-
-    final boltPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 2.2
-      ..strokeCap = StrokeCap.round
-      ..color = WeatherPalette.lightningBolt.withValues(alpha: 0.5 * opacity);
-    final start = Offset(size.width * 0.68, size.height * 0.1);
-    final path = Path()
-      ..moveTo(start.dx, start.dy)
-      ..lineTo(start.dx - 24, start.dy + 54)
-      ..lineTo(start.dx + 4, start.dy + 44)
-      ..lineTo(start.dx - 28, start.dy + 118);
-    canvas.drawPath(path, boltPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant _WeatherPainter oldDelegate) {
-    return oldDelegate.condition != condition ||
-        oldDelegate.isDay != isDay ||
-        oldDelegate.progress != progress ||
-        oldDelegate.tokens != tokens;
   }
 }

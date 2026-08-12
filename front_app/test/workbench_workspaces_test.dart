@@ -7,6 +7,7 @@ import 'package:research_life/core/theme/app_theme.dart';
 import 'package:research_life/core/theme/app_tokens.dart';
 import 'package:research_life/features/workbench/materials_workspace.dart';
 import 'package:research_life/features/workbench/research_workspace.dart';
+import 'package:research_life/features/workbench/life_workspace.dart';
 import 'package:research_life/features/workbench/today_workspace.dart';
 import 'package:research_life/services/analysis/analysis_service.dart';
 import 'package:research_life/services/calendar/institution_calendar_service.dart';
@@ -96,8 +97,35 @@ void main() {
     );
 
     expect(find.text('快速记录'), findsOneWidget);
+    expect(find.byKey(const Key('page-header')), findsNothing);
+    expect(
+      tester.getSize(find.byKey(const Key('workspace-navigation-bar'))).height,
+      lessThanOrEqualTo(52),
+    );
     await tester.tap(find.text('快速记录'));
     expect(requests, 1);
+    navigation.dispose();
+  });
+
+  testWidgets('single-page Life starts directly with content', (tester) async {
+    final controller = _createController();
+    final navigation = WorkbenchNavigationController(
+      initialWorkspace: WorkbenchWorkspace.life,
+    );
+    await tester.pumpWidget(
+      _testApp(
+        controller,
+        LifeWorkspace(
+          navigation: navigation,
+          pages: const {WorkbenchTab.lifeCampus: Center(child: Text('校园内容'))},
+        ),
+      ),
+    );
+
+    expect(find.text('生活'), findsNothing);
+    expect(find.text('校园地点与常用信息。'), findsNothing);
+    expect(find.byKey(const Key('workspace-navigation-bar')), findsNothing);
+    expect(find.text('校园内容'), findsOneWidget);
     navigation.dispose();
   });
 }

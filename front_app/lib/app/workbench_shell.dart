@@ -24,8 +24,7 @@ typedef WorkbenchWorkspaceBuilder =
       WorkbenchNavigationController navigation,
       WorkbenchWorkspace workspace,
     );
-typedef WorkbenchWeatherBuilder =
-    Widget Function(BuildContext context, VoidCallback onExit);
+typedef WorkbenchWeatherBuilder = Widget Function(BuildContext context);
 
 class WorkbenchShell extends StatefulWidget {
   const WorkbenchShell({
@@ -169,28 +168,9 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
     if (mounted) _openTodayTodo();
   }
 
-  KeyEventResult _handleKeyEvent(FocusNode _, KeyEvent event) {
-    if (event is KeyDownEvent &&
-        event.logicalKey == LogicalKeyboardKey.escape &&
-        _navigation.weatherOpen) {
-      _exitWeather();
-      return KeyEventResult.handled;
-    }
-    return KeyEventResult.ignored;
-  }
-
   void _openWeather() {
     _weatherEntryFocus.requestFocus();
     _navigation.openWeather();
-  }
-
-  void _exitWeather() {
-    _navigation.exitWeather();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        _weatherEntryFocus.requestFocus();
-      }
-    });
   }
 
   @override
@@ -203,86 +183,82 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
     final weatherBuilder = widget.weatherBuilder ?? _buildProductionWeather;
     final shell = AnimatedBuilder(
       animation: _navigation,
-      builder: (context, _) => Focus(
-        onKeyEvent: _handleKeyEvent,
-        child: Scaffold(
-          backgroundColor: tokens.canvas,
-          body: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-                colors: [
-                  tokens.backdropTop,
-                  tokens.backdropMiddle,
-                  tokens.backdropBottom,
-                ],
-              ),
+      builder: (context, _) => Scaffold(
+        backgroundColor: tokens.canvas,
+        body: DecoratedBox(
+          decoration: BoxDecoration(
+            gradient: LinearGradient(
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
+              colors: [
+                tokens.backdropTop,
+                tokens.backdropMiddle,
+                tokens.backdropBottom,
+              ],
             ),
-            child: SafeArea(
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  final forcedCompact =
-                      constraints.maxWidth <= _compactBreakpoint;
-                  final collapsed = forcedCompact || _sidebarCollapsed;
-                  final sidebarWidth = collapsed
-                      ? _collapsedSidebarWidth
-                      : _expandedSidebarWidth;
-                  return Padding(
-                    padding: const EdgeInsets.all(16),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        _WorkbenchSidebar(
-                          sidebarKey: const Key('workbench-sidebar'),
-                          width: sidebarWidth,
-                          forcedCompact: forcedCompact,
-                          reduceMotion: reduceMotion,
-                          navigation: _navigation,
-                          weatherFocusNode: _weatherEntryFocus,
-                          workspaceFocusNodes: _workspaceFocus,
-                          onWeatherSelected: _openWeather,
-                          onWorkspaceSelected: _navigation.selectWorkspace,
-                          onSearchRequested:
-                              widget.onSearchRequested ??
-                              (_usesProductionContent ? _openSearch : () {}),
-                          onToggle: () => setState(
-                            () => _sidebarCollapsed = !_sidebarCollapsed,
-                          ),
+          ),
+          child: SafeArea(
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final forcedCompact =
+                    constraints.maxWidth <= _compactBreakpoint;
+                final collapsed = forcedCompact || _sidebarCollapsed;
+                final sidebarWidth = collapsed
+                    ? _collapsedSidebarWidth
+                    : _expandedSidebarWidth;
+                return Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _WorkbenchSidebar(
+                        sidebarKey: const Key('workbench-sidebar'),
+                        width: sidebarWidth,
+                        forcedCompact: forcedCompact,
+                        reduceMotion: reduceMotion,
+                        navigation: _navigation,
+                        weatherFocusNode: _weatherEntryFocus,
+                        workspaceFocusNodes: _workspaceFocus,
+                        onWeatherSelected: _openWeather,
+                        onWorkspaceSelected: _navigation.selectWorkspace,
+                        onSearchRequested:
+                            widget.onSearchRequested ??
+                            (_usesProductionContent ? _openSearch : () {}),
+                        onToggle: () => setState(
+                          () => _sidebarCollapsed = !_sidebarCollapsed,
                         ),
-                        const SizedBox(width: 20),
-                        Expanded(
-                          child: RepaintBoundary(
-                            child: DecoratedBox(
-                              decoration: BoxDecoration(
-                                color: tokens.shellSurface.withValues(
-                                  alpha: 0.97,
-                                ),
-                                borderRadius: BorderRadius.circular(
-                                  tokens.radiusXLarge,
-                                ),
-                                border: Border.all(color: tokens.shellBorder),
-                                boxShadow: tokens.shadowMd,
+                      ),
+                      const SizedBox(width: 20),
+                      Expanded(
+                        child: RepaintBoundary(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: tokens.shellSurface.withValues(
+                                alpha: 0.97,
                               ),
-                              child: ClipRRect(
-                                borderRadius: BorderRadius.circular(
-                                  tokens.radiusXLarge,
-                                ),
-                                child: _WorkbenchContent(
-                                  navigation: _navigation,
-                                  workspaceBuilder: workspaceBuilder,
-                                  weatherBuilder: weatherBuilder,
-                                  onExitWeather: _exitWeather,
-                                ),
+                              borderRadius: BorderRadius.circular(
+                                tokens.radiusXLarge,
+                              ),
+                              border: Border.all(color: tokens.shellBorder),
+                              boxShadow: tokens.shadowMd,
+                            ),
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(
+                                tokens.radiusXLarge,
+                              ),
+                              child: _WorkbenchContent(
+                                navigation: _navigation,
+                                workspaceBuilder: workspaceBuilder,
+                                weatherBuilder: weatherBuilder,
                               ),
                             ),
                           ),
                         ),
-                      ],
-                    ),
-                  );
-                },
-              ),
+                      ),
+                    ],
+                  ),
+                );
+              },
             ),
           ),
         ),
@@ -325,28 +301,7 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
     };
   }
 
-  Widget _buildProductionWeather(BuildContext context, VoidCallback onExit) {
-    final tokens = context.tokens;
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        const HomePage(),
-        Positioned(
-          right: 20,
-          top: 20,
-          child: IconButton.filledTonal(
-            tooltip: '返回工作台',
-            onPressed: onExit,
-            icon: const Icon(Icons.arrow_back_rounded),
-            style: IconButton.styleFrom(
-              foregroundColor: tokens.textPrimary,
-              backgroundColor: tokens.panelSurface.withValues(alpha: 0.78),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
+  Widget _buildProductionWeather(BuildContext context) => const HomePage();
 
   void _openQuickCapture() {
     final controller = _controller;
@@ -469,7 +424,11 @@ class _WorkbenchSidebar extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    _SidebarBrand(collapsed: visuallyCollapsed),
+                    _SidebarBrand(
+                      collapsed: visuallyCollapsed,
+                      forcedCompact: forcedCompact,
+                      onToggle: onToggle,
+                    ),
                     const SizedBox(height: 14),
                     _SidebarUtilityButton(
                       collapsed: visuallyCollapsed,
@@ -514,17 +473,6 @@ class _WorkbenchSidebar extends StatelessWidget {
                       focusNode: workspaceFocusNodes[settings.workspace]!,
                       onPressed: () => onWorkspaceSelected(settings.workspace),
                     ),
-                    if (!forcedCompact) ...[
-                      const SizedBox(height: 12),
-                      _SidebarUtilityButton(
-                        collapsed: visuallyCollapsed,
-                        label: visuallyCollapsed ? '展开导航' : '收起导航',
-                        icon: visuallyCollapsed
-                            ? Icons.keyboard_double_arrow_right_rounded
-                            : Icons.keyboard_double_arrow_left_rounded,
-                        onPressed: onToggle,
-                      ),
-                    ],
                   ],
                 ),
               ),
@@ -537,25 +485,57 @@ class _WorkbenchSidebar extends StatelessWidget {
 }
 
 class _SidebarBrand extends StatelessWidget {
-  const _SidebarBrand({required this.collapsed});
+  const _SidebarBrand({
+    required this.collapsed,
+    required this.forcedCompact,
+    required this.onToggle,
+  });
 
   final bool collapsed;
+  final bool forcedCompact;
+  final VoidCallback onToggle;
 
   @override
   Widget build(BuildContext context) {
+    final brand = Text(
+      collapsed ? '研' : '研LIFE',
+      maxLines: 1,
+      style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+        color: Colors.white,
+        fontWeight: FontWeight.w600,
+        letterSpacing: -0.4,
+      ),
+    );
+    if (collapsed) {
+      return Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (!forcedCompact)
+            _SidebarUtilityButton(
+              key: const Key('sidebar-toggle'),
+              collapsed: true,
+              label: '展开导航',
+              icon: Icons.keyboard_double_arrow_right_rounded,
+              onPressed: onToggle,
+            ),
+          if (!forcedCompact) const SizedBox(height: 8),
+          SizedBox(height: 34, child: Center(child: brand)),
+        ],
+      );
+    }
     return SizedBox(
       height: 42,
-      child: Align(
-        alignment: collapsed ? Alignment.center : Alignment.centerLeft,
-        child: Text(
-          collapsed ? '研' : '研LIFE',
-          maxLines: 1,
-          style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-            color: Colors.white,
-            fontWeight: FontWeight.w600,
-            letterSpacing: -0.4,
+      child: Row(
+        children: [
+          Expanded(child: brand),
+          _SidebarUtilityButton(
+            key: const Key('sidebar-toggle'),
+            collapsed: true,
+            label: '收起导航',
+            icon: Icons.keyboard_double_arrow_left_rounded,
+            onPressed: onToggle,
           ),
-        ),
+        ],
       ),
     );
   }
@@ -567,6 +547,7 @@ class _SidebarUtilityButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    super.key,
   });
 
   final bool collapsed;
@@ -734,13 +715,11 @@ class _WorkbenchContent extends StatefulWidget {
     required this.navigation,
     required this.workspaceBuilder,
     required this.weatherBuilder,
-    required this.onExitWeather,
   });
 
   final WorkbenchNavigationController navigation;
   final WorkbenchWorkspaceBuilder workspaceBuilder;
   final WorkbenchWeatherBuilder weatherBuilder;
-  final VoidCallback onExitWeather;
 
   @override
   State<_WorkbenchContent> createState() => _WorkbenchContentState();
@@ -791,7 +770,7 @@ class _WorkbenchContentState extends State<_WorkbenchContent> {
                 ignoring: !widget.navigation.weatherOpen,
                 child: Offstage(
                   offstage: !widget.navigation.weatherOpen,
-                  child: widget.weatherBuilder(context, widget.onExitWeather),
+                  child: widget.weatherBuilder(context),
                 ),
               ),
             ),

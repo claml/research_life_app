@@ -36,7 +36,6 @@ class TodayWorkspace extends StatelessWidget {
       key: const Key('today-workspace'),
       workspace: WorkbenchWorkspace.today,
       navigation: navigation,
-      title: '今天',
       pages: resolvedPages,
       primaryAction: FilledButton.icon(
         onPressed: onQuickCapture,

@@ -97,34 +97,6 @@ void main() {
     expect(weatherService.fetchCount, 1);
   });
 
-  test('persists and restores weather animation preference', () async {
-    final database = AppDatabase(NativeDatabase.memory());
-    addTearDown(database.close);
-    final preferencesRepository = PreferencesRepository(database);
-    final weatherService = _FakeWeatherService();
-    final controller = _createController(
-      preferencesRepository: preferencesRepository,
-      weatherService: weatherService,
-    );
-    addTearDown(controller.dispose);
-
-    expect(controller.weatherAnimationEnabled, isTrue);
-
-    await controller.setWeatherAnimationEnabled(false);
-
-    expect(controller.weatherAnimationEnabled, isFalse);
-    expect(await preferencesRepository.loadWeatherAnimationEnabled(), isFalse);
-
-    final restoredController = _createController(
-      preferencesRepository: preferencesRepository,
-      weatherService: weatherService,
-    );
-    addTearDown(restoredController.dispose);
-    await restoredController.ensureWeatherApiLoaded();
-
-    expect(restoredController.weatherAnimationEnabled, isFalse);
-  });
-
   test('selects and persists a searched weather city', () async {
     final database = AppDatabase(NativeDatabase.memory());
     addTearDown(database.close);

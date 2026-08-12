@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:research_life/app/workbench_destination.dart';
 import 'package:research_life/app/workbench_navigation_controller.dart';
@@ -22,7 +21,7 @@ void main() {
     expect(labels, containsAllInOrder(['天气', '今天', '科研', '资料', '生活', '设置']));
   });
 
-  testWidgets('Escape exits only Weather and restores its entry focus', (
+  testWidgets('primary navigation leaves Weather without a return control', (
     tester,
   ) async {
     await _setSurface(tester, const Size(1280, 800));
@@ -36,14 +35,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('weather-view')), findsOneWidget);
 
-    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    expect(find.text('返回'), findsNothing);
+    await tester.tap(find.bySemanticsLabel('科研'));
     await tester.pumpAndSettle();
 
     expect(find.text('research:researchNotes'), findsOneWidget);
-    expect(
-      FocusManager.instance.primaryFocus?.debugLabel,
-      contains('weather-entry'),
-    );
   });
 
   testWidgets('collapses at desktop and forces compact navigation at 980px', (
@@ -55,14 +51,18 @@ void main() {
       tester.getSize(find.byKey(const Key('workbench-sidebar'))).width,
       216,
     );
+    expect(
+      tester.getTopLeft(find.byKey(const Key('sidebar-toggle'))).dy,
+      lessThan(tester.getTopLeft(find.bySemanticsLabel('搜索')).dy),
+    );
 
-    await tester.tap(find.text('收起导航'));
+    await tester.tap(find.byKey(const Key('sidebar-toggle')));
     await tester.pumpAndSettle();
     expect(
       tester.getSize(find.byKey(const Key('workbench-sidebar'))).width,
       72,
     );
-    await tester.tap(find.byTooltip('展开导航'));
+    await tester.tap(find.byKey(const Key('sidebar-toggle')));
     await tester.pumpAndSettle();
     expect(
       tester.getSize(find.byKey(const Key('workbench-sidebar'))).width,
@@ -107,13 +107,8 @@ Widget _testShell({WorkbenchNavigationController? navigation}) {
       navigationController: navigation,
       workspaceBuilder: (context, controller, workspace) =>
           Center(child: Text('${workspace.name}:${controller.activeTab.name}')),
-      weatherBuilder: (context, onExit) => Center(
-        child: TextButton(
-          key: const Key('weather-view'),
-          onPressed: onExit,
-          child: const Text('返回'),
-        ),
-      ),
+      weatherBuilder: (context) =>
+          const Center(child: Text('天气', key: Key('weather-view'))),
     ),
   );
 }

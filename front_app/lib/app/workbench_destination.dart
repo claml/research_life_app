@@ -16,8 +16,6 @@ enum WorkbenchTab {
   materialsDocumentView,
   materialsPdfTools,
   lifeCampus,
-  lifePet,
-  lifePersonalization,
   settingsOverview,
 }
 
@@ -93,11 +91,7 @@ extension WorkbenchWorkspaceMetadata on WorkbenchWorkspace {
       WorkbenchTab.materialsDocumentView,
       WorkbenchTab.materialsPdfTools,
     ],
-    WorkbenchWorkspace.life => const [
-      WorkbenchTab.lifeCampus,
-      WorkbenchTab.lifePet,
-      WorkbenchTab.lifePersonalization,
-    ],
+    WorkbenchWorkspace.life => const [WorkbenchTab.lifeCampus],
     WorkbenchWorkspace.settings => const [WorkbenchTab.settingsOverview],
   };
 
@@ -118,9 +112,7 @@ extension WorkbenchTabMetadata on WorkbenchTab {
     WorkbenchTab.materialsFiles ||
     WorkbenchTab.materialsDocumentView ||
     WorkbenchTab.materialsPdfTools => WorkbenchWorkspace.materials,
-    WorkbenchTab.lifeCampus ||
-    WorkbenchTab.lifePet ||
-    WorkbenchTab.lifePersonalization => WorkbenchWorkspace.life,
+    WorkbenchTab.lifeCampus => WorkbenchWorkspace.life,
     WorkbenchTab.settingsOverview => WorkbenchWorkspace.settings,
   };
 
@@ -138,8 +130,6 @@ extension WorkbenchTabMetadata on WorkbenchTab {
     WorkbenchTab.materialsDocumentView => '文档查看',
     WorkbenchTab.materialsPdfTools => 'PDF 工具',
     WorkbenchTab.lifeCampus => '校园',
-    WorkbenchTab.lifePet => '桌宠',
-    WorkbenchTab.lifePersonalization => '个性化',
     WorkbenchTab.settingsOverview => '设置',
   };
 }

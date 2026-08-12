@@ -6,7 +6,7 @@ abstract final class AppLayout {
   static const double pageHeaderMinHeight = 138;
   static const double pageHorizontalPadding = 28;
   static const double pageContentTopPadding = 28;
-  static const double workspaceTabHeight = 44;
+  static const double workspaceTabHeight = 30;
   static const Duration quickMotion = Duration(milliseconds: 180);
 }
 

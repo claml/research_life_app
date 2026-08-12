@@ -19,8 +19,6 @@ class MaterialsWorkspace extends StatelessWidget {
       key: const Key('materials-workspace'),
       workspace: WorkbenchWorkspace.materials,
       navigation: navigation,
-      title: '资料',
-      description: '文件、查看与 PDF 工具。',
       pages:
           pages ??
           const {

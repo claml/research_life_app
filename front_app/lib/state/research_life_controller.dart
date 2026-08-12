@@ -273,8 +273,6 @@ class ResearchLifeController extends ChangeNotifier {
   String _weatherApiKey = '';
   String _weatherApiHost = '';
   bool _weatherApiLoaded = false;
-  bool _weatherAnimationEnabled = true;
-  bool _weatherAnimationPreferenceLoaded = false;
   bool _petCompanionLoaded = false;
   bool _petCompanionBusy = false;
 
@@ -547,7 +545,6 @@ class ResearchLifeController extends ChangeNotifier {
   String get weatherApiKey => _weatherApiKey;
   String get weatherApiHost => _weatherApiHost;
   bool get weatherApiLoaded => _weatherApiLoaded;
-  bool get weatherAnimationEnabled => _weatherAnimationEnabled;
   bool get petCompanionLoaded => _petCompanionLoaded;
   bool get petCompanionBusy => _petCompanionBusy;
   bool get petAutoStart => _petAutoStart;
@@ -3504,22 +3501,6 @@ class ResearchLifeController extends ChangeNotifier {
       apiKey: _weatherApiKey,
       apiHost: _weatherApiHost,
     );
-    await ensureWeatherAnimationPreferenceLoaded();
-  }
-
-  Future<void> ensureWeatherAnimationPreferenceLoaded() async {
-    if (_weatherAnimationPreferenceLoaded) {
-      return;
-    }
-    _weatherAnimationPreferenceLoaded = true;
-    _weatherAnimationEnabled =
-        await _preferencesRepository?.loadWeatherAnimationEnabled() ?? true;
-  }
-
-  Future<void> setWeatherAnimationEnabled(bool enabled) async {
-    _weatherAnimationEnabled = enabled;
-    notifyListeners();
-    await _preferencesRepository?.saveWeatherAnimationEnabled(enabled);
   }
 
   Future<String> saveWeatherApiSettings({

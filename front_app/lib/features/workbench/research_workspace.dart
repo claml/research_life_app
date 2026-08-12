@@ -44,8 +44,6 @@ class ResearchWorkspace extends StatelessWidget {
       key: const Key('research-workspace'),
       workspace: WorkbenchWorkspace.research,
       navigation: navigation,
-      title: '科研',
-      description: '阅读、整理与复盘。',
       pages: resolvedPages,
       primaryAction: FilledButton.icon(
         onPressed: onOpenAi ?? () => _showAgent(context),

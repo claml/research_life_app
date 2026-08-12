@@ -16,8 +16,6 @@ class SettingsWorkspace extends StatelessWidget {
       key: const Key('settings-workspace'),
       workspace: WorkbenchWorkspace.settings,
       navigation: navigation,
-      title: '设置',
-      description: '本地工作台设置。',
       pages: const {WorkbenchTab.settingsOverview: SettingsPage()},
     );
   }

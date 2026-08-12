@@ -3,22 +3,26 @@ import 'package:research_life/app/workbench_destination.dart';
 import 'package:research_life/app/workbench_navigation_controller.dart';
 
 void main() {
-  test('Weather is manual and restores the exact previous workspace tab', () {
-    final navigation = WorkbenchNavigationController();
-    expect(navigation.weatherOpen, isFalse);
-    navigation.selectWorkspace(WorkbenchWorkspace.research);
-    navigation.selectTab(WorkbenchTab.researchNotes);
+  test(
+    'Weather behaves like a normal destination and never traps navigation',
+    () {
+      final navigation = WorkbenchNavigationController();
+      expect(navigation.weatherOpen, isFalse);
+      navigation.selectWorkspace(WorkbenchWorkspace.research);
+      navigation.selectTab(WorkbenchTab.researchNotes);
 
-    navigation.openWeather();
-    expect(navigation.weatherOpen, isTrue);
-    navigation.selectWorkspace(WorkbenchWorkspace.life);
-    navigation.selectTab(WorkbenchTab.lifePet);
-    navigation.exitWeather();
+      navigation.openWeather();
+      expect(navigation.weatherOpen, isTrue);
+      navigation.selectWorkspace(WorkbenchWorkspace.life);
 
-    expect(navigation.weatherOpen, isFalse);
-    expect(navigation.workspace, WorkbenchWorkspace.research);
-    expect(navigation.activeTab, WorkbenchTab.researchNotes);
-  });
+      expect(navigation.weatherOpen, isFalse);
+      expect(navigation.workspace, WorkbenchWorkspace.life);
+      expect(navigation.activeTab, WorkbenchTab.lifeCampus);
+
+      navigation.selectWorkspace(WorkbenchWorkspace.research);
+      expect(navigation.activeTab, WorkbenchTab.researchNotes);
+    },
+  );
 
   test('tabs are remembered independently for every workspace', () {
     final navigation = WorkbenchNavigationController();
@@ -60,6 +64,7 @@ void main() {
       '人物',
       '统计',
     ]);
+    expect(WorkbenchWorkspace.life.tabs, [WorkbenchTab.lifeCampus]);
   });
 
   test(

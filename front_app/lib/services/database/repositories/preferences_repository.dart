@@ -22,7 +22,6 @@ class PreferencesRepository implements LocalMigrationPreferences {
   static const weatherLocationKey = 'weatherLocation';
   static const weatherApiKeyKey = 'weatherApiKey';
   static const weatherApiHostKey = 'weatherApiHost';
-  static const weatherAnimationEnabledKey = 'weatherAnimationEnabled';
   static const petCompanionKey = 'petCompanion';
   static const pdfReaderPreferencesKey = 'pdfReaderPreferences';
   static const closeToTrayKey = 'closeToTray';
@@ -116,18 +115,6 @@ class PreferencesRepository implements LocalMigrationPreferences {
 
   Future<void> saveWeatherApiHost(String apiHost) {
     return saveString(weatherApiHostKey, apiHost.trim());
-  }
-
-  Future<bool?> loadWeatherAnimationEnabled() async {
-    final raw = await loadString(weatherAnimationEnabledKey);
-    if (raw == null) {
-      return null;
-    }
-    return raw == 'true';
-  }
-
-  Future<void> saveWeatherAnimationEnabled(bool enabled) {
-    return saveString(weatherAnimationEnabledKey, enabled ? 'true' : 'false');
   }
 
   Future<bool> loadCloseToTray() async {

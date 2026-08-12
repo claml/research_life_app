@@ -10,6 +10,7 @@ import '../core/theme/app_theme.dart';
 import '../core/theme/app_tokens.dart';
 import '../features/pin_lock/pin_lock_gate.dart';
 import '../services/storage/backup_service.dart';
+import 'app_window_frame.dart';
 import 'local_app_runtime.dart';
 import 'local_services_scope.dart';
 import 'research_life_scope.dart';
@@ -271,7 +272,9 @@ class _ResearchLifeAppState extends State<ResearchLifeApp> {
               title: '研LIFE',
               debugShowCheckedModeBanner: false,
               theme: AppTheme.build(colorTheme),
-              home: const PinLockGate(child: WorkbenchShell()),
+              home: const AppWindowFrame(
+                child: PinLockGate(child: WorkbenchShell()),
+              ),
             );
           },
         ),
@@ -292,19 +295,21 @@ class _StartupSurface extends StatelessWidget {
       title: '研LIFE',
       debugShowCheckedModeBanner: false,
       theme: AppTheme.build(AppColorTheme.green),
-      home: Scaffold(
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.auto_awesome_rounded, size: 34),
-              const SizedBox(height: 14),
-              Text(failed ? '本地工作台启动失败' : '正在打开本地工作台'),
-              if (failed) ...[
-                const SizedBox(height: 12),
-                FilledButton(onPressed: onRetry, child: const Text('重试')),
+      home: AppWindowFrame(
+        child: Scaffold(
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.auto_awesome_rounded, size: 34),
+                const SizedBox(height: 14),
+                Text(failed ? '本地工作台启动失败' : '正在打开本地工作台'),
+                if (failed) ...[
+                  const SizedBox(height: 12),
+                  FilledButton(onPressed: onRetry, child: const Text('重试')),
+                ],
               ],
-            ],
+            ),
           ),
         ),
       ),
