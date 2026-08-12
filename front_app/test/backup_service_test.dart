@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:crypto/crypto.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:path/path.dart' as p;
 import 'package:research_life/services/database/app_database.dart';
 import 'package:research_life/services/storage/backup_manifest.dart';
 import 'package:research_life/services/storage/backup_service.dart';
@@ -24,7 +25,7 @@ void main() {
       ).writeManifest(createdAt: DateTime(2026, 5, 13, 9));
       await fixture.writeLocalLibraryFile(
         'library_manifest.json',
-        '{"documents":[{"id":"doc_1"}]}',
+        '{"documents":[{"id":"doc_1","isDeleted":true}]}',
       );
       await fixture.writeLocalLibraryFile(
         'annotations.json',
@@ -81,6 +82,83 @@ void main() {
       );
     });
 
+    test('keeps a backup pending until validation succeeds', () async {
+      final fixture = await _BackupFixture.create(
+        timestamp: DateTime(2026, 8, 9, 10),
+      );
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('safe');
+      final backupsDirectory = await fixture.workspaceService
+          .resolveBackupsDirectory();
+      final firstPublishedDirectory = backupsDirectory
+          .watch(events: FileSystemEvent.create)
+          .firstWhere((event) {
+            if (!event.isDirectory) {
+              return false;
+            }
+            return Directory(event.path).parent.absolute.path ==
+                backupsDirectory.absolute.path;
+          })
+          .then((event) => event.path.split(Platform.pathSeparator).last);
+
+      final resultFuture = fixture.service.createBackup();
+      final firstDirectoryName = await firstPublishedDirectory.timeout(
+        const Duration(seconds: 5),
+      );
+      final result = await resultFuture;
+
+      expect(firstDirectoryName, startsWith('.pending-'));
+      expect(result.directory.path, isNot(contains('.pending-')));
+      expect(await fixture.service.validateBackup(result.directory), isNotNull);
+      expect(
+        await result.directory.parent
+            .list()
+            .where((entry) => entry.path.contains('.pending-'))
+            .isEmpty,
+        isTrue,
+      );
+    });
+
+    test(
+      'publishes concurrent same-clock backups without sharing pending data',
+      () async {
+        final fixture = await _BackupFixture.create(
+          timestamp: DateTime(2026, 8, 9, 10),
+        );
+        addTearDown(fixture.dispose);
+        await fixture.writeDatabaseValue('concurrent');
+
+        final results = await Future.wait([
+          fixture.service.createBackup(purpose: BackupPurpose.manual),
+          fixture.service.createBackup(purpose: BackupPurpose.migration),
+        ]);
+
+        expect(
+          results.map((result) => result.directory.path).toSet(),
+          hasLength(2),
+        );
+        expect(results.map((result) => result.purpose).toSet(), {
+          BackupPurpose.manual,
+          BackupPurpose.migration,
+        });
+        for (final result in results) {
+          final validated = await fixture.service.validateBackup(
+            result.directory,
+          );
+          expect(validated.purpose, result.purpose);
+        }
+        final backupsDirectory = await fixture.workspaceService
+            .resolveBackupsDirectory();
+        expect(
+          await backupsDirectory
+              .list()
+              .where((entry) => entry.path.contains('.pending-'))
+              .isEmpty,
+          isTrue,
+        );
+      },
+    );
+
     test('writes correct manifest content', () async {
       final fixture = await _BackupFixture.create(
         timestamp: DateTime(2026, 5, 13, 9, 10, 11),
@@ -90,7 +168,7 @@ void main() {
       await fixture.workspaceService.saveWeeklyPromptTemplate('template');
       await fixture.writeLocalLibraryFile(
         'library_manifest.json',
-        '{"documents":[{"id":"doc_manifest"}]}',
+        '{"documents":[{"id":"doc_manifest","isDeleted":true}]}',
       );
 
       final result = await fixture.service.createBackup();
@@ -134,6 +212,371 @@ void main() {
       expect(localFiles.single.sha256, await _sha256(localLibraryBackup));
     });
 
+    test('portable backup excludes ordinary preference credentials', () async {
+      final fixture = await _BackupFixture.create();
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('credentials');
+      await fixture.writePreference(
+        'agentLlmSettings',
+        '{"apiKey":"agent-secret","modelName":"model"}',
+      );
+      await fixture.writePreference(
+        'remoteLlmAnalysisSettings',
+        '{"apiKey":"analysis-secret"}',
+      );
+      await fixture.writePreference('weatherApiKey', 'weather-secret');
+      await fixture.writePreference('colorTheme', 'green');
+
+      final result = await fixture.service.createBackup();
+      final backupDatabase = File(
+        '${result.directory.path}${Platform.pathSeparator}research_life.sqlite',
+      );
+      final database = sqlite3.open(backupDatabase.path);
+      final keys = database
+          .select('SELECT "key" FROM preferences ORDER BY "key";')
+          .map((row) => row['key'])
+          .toList();
+
+      expect(keys, contains('colorTheme'));
+      expect(keys, isNot(contains('agentLlmSettings')));
+      expect(keys, isNot(contains('remoteLlmAnalysisSettings')));
+      expect(keys, isNot(contains('weatherApiKey')));
+      database.close();
+      final rawDatabase = String.fromCharCodes(
+        await backupDatabase.readAsBytes(),
+      );
+      expect(rawDatabase, isNot(contains('agent-secret')));
+      expect(rawDatabase, isNot(contains('analysis-secret')));
+      expect(rawDatabase, isNot(contains('weather-secret')));
+      final legacyPreferences = await File(
+        '${result.directory.path}${Platform.pathSeparator}preferences.json',
+      ).readAsString();
+      expect(legacyPreferences, isNot(contains('agent-secret')));
+      expect(legacyPreferences, isNot(contains('analysis-secret')));
+      expect(legacyPreferences, isNot(contains('weather-secret')));
+    });
+
+    test('persists backup purpose in the validated manifest', () async {
+      final fixture = await _BackupFixture.create(
+        timestamp: DateTime(2026, 8, 9, 10),
+      );
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('migration-source');
+
+      final result = await fixture.service.createBackup(
+        purpose: BackupPurpose.migration,
+      );
+      final validated = await fixture.service.validateBackup(result.directory);
+
+      expect(result.purpose, BackupPurpose.migration);
+      expect(result.manifest.purpose, BackupPurpose.migration);
+      expect(validated.purpose, BackupPurpose.migration);
+      final manifestJson =
+          jsonDecode(
+                await File(
+                  '${result.directory.path}${Platform.pathSeparator}backup_manifest.json',
+                ).readAsString(),
+              )
+              as Map<String, dynamic>;
+      expect(manifestJson['purpose'], 'migration');
+    });
+
+    test('treats a legacy manifest without purpose as manual', () async {
+      final fixture = await _BackupFixture.create();
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('legacy');
+      final result = await fixture.service.createBackup();
+      final manifestFile = File(
+        '${result.directory.path}${Platform.pathSeparator}backup_manifest.json',
+      );
+      final manifestJson =
+          (jsonDecode(await manifestFile.readAsString()) as Map)
+              .cast<String, Object?>()
+            ..remove('purpose');
+      await manifestFile.writeAsString(jsonEncode(manifestJson));
+
+      final validated = await fixture.service.validateBackup(result.directory);
+
+      expect(validated.purpose, BackupPurpose.manual);
+    });
+
+    test('rejects structurally malformed manifest metadata', () async {
+      final fixture = await _BackupFixture.create();
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('structural-validation');
+      final malformedValues = <(String, Object?)>[
+        ('createdAt', 'not-a-date'),
+        ('appVersion', ''),
+        ('appVersion', 42),
+        ('manifestVersion', 1.9),
+        ('schemaVersion', 0),
+        ('schemaVersion', 3.9),
+        ('workspacePath', ''),
+        ('workspacePath', <Object?>[]),
+        ('purpose', null),
+        ('workspaceManifestFile', 'not-an-object'),
+        ('localFileLibraryFiles', 'not-a-list'),
+        ('localFileLibraryFiles', <Object?>[42]),
+      ];
+
+      for (final (field, malformedValue) in malformedValues) {
+        final result = await fixture.service.createBackup();
+        fixture.advance(const Duration(seconds: 1));
+        final manifestFile = File(
+          '${result.directory.path}${Platform.pathSeparator}backup_manifest.json',
+        );
+        final manifestJson =
+            (jsonDecode(await manifestFile.readAsString()) as Map)
+                .cast<String, Object?>();
+        manifestJson[field] = malformedValue;
+        await manifestFile.writeAsString(jsonEncode(manifestJson));
+
+        await expectLater(
+          fixture.service.validateBackup(result.directory),
+          throwsA(isA<BackupValidationException>()),
+          reason: field,
+        );
+      }
+    });
+
+    test('rejects fractional backup file sizes without truncation', () async {
+      final fixture = await _BackupFixture.create();
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('fractional-size');
+      final result = await fixture.service.createBackup();
+      final manifestFile = File(
+        '${result.directory.path}${Platform.pathSeparator}backup_manifest.json',
+      );
+      final manifestJson =
+          (jsonDecode(await manifestFile.readAsString()) as Map)
+              .cast<String, Object?>();
+      final databaseFile = (manifestJson['databaseFile'] as Map)
+          .cast<String, Object?>();
+      databaseFile['sizeBytes'] =
+          (databaseFile['sizeBytes'] as int).toDouble() + 0.9;
+      await manifestFile.writeAsString(jsonEncode(manifestJson));
+
+      await expectLater(
+        fixture.service.validateBackup(result.directory),
+        throwsA(isA<BackupValidationException>()),
+      );
+    });
+
+    test(
+      'lists validated backups newest first and ignores other directories',
+      () async {
+        final fixture = await _BackupFixture.create(
+          timestamp: DateTime(2026, 8, 9, 10),
+        );
+        addTearDown(fixture.dispose);
+        await fixture.writeDatabaseValue('safe');
+        final manual = await fixture.service.createBackup();
+        fixture.advance(const Duration(seconds: 1));
+        final safety = await fixture.service.createBackup(
+          purpose: BackupPurpose.safety,
+        );
+        final backupsDirectory = await fixture.workspaceService
+            .resolveBackupsDirectory();
+        final invalid = Directory(
+          '${backupsDirectory.path}${Platform.pathSeparator}invalid',
+        );
+        final pending = Directory(
+          '${backupsDirectory.path}${Platform.pathSeparator}.pending-stale',
+        );
+        await invalid.create();
+        await pending.create();
+
+        final backups = await fixture.service.listBackups();
+
+        expect(backups.map((backup) => backup.directory.path), [
+          safety.directory.path,
+          manual.directory.path,
+        ]);
+        expect(backups.map((backup) => backup.purpose), [
+          BackupPurpose.safety,
+          BackupPurpose.manual,
+        ]);
+        expect(await invalid.exists(), isTrue);
+        expect(await pending.exists(), isTrue);
+      },
+    );
+
+    test(
+      'retention removes only validated backups older than the newest ten',
+      () async {
+        final fixture = await _BackupFixture.create(
+          timestamp: DateTime(2026, 8, 9, 10),
+        );
+        addTearDown(fixture.dispose);
+        await fixture.writeDatabaseValue('safe');
+        final created = <BackupCreateResult>[];
+        for (var index = 0; index < 12; index += 1) {
+          created.add(await fixture.service.createBackup());
+          fixture.advance(const Duration(seconds: 1));
+        }
+        final backupsDirectory = await fixture.workspaceService
+            .resolveBackupsDirectory();
+        final invalid = Directory(
+          '${backupsDirectory.path}${Platform.pathSeparator}invalid',
+        );
+        final pending = Directory(
+          '${backupsDirectory.path}${Platform.pathSeparator}.pending-stale',
+        );
+        await invalid.create();
+        await pending.create();
+
+        expect(await fixture.service.pruneBackups(keep: 10), 2);
+
+        expect(await fixture.service.listBackups(), hasLength(10));
+        expect(await created[0].directory.exists(), isFalse);
+        expect(await created[1].directory.exists(), isFalse);
+        expect(await created[2].directory.exists(), isTrue);
+        expect(await created.last.directory.exists(), isTrue);
+        expect(await invalid.exists(), isTrue);
+        expect(await pending.exists(), isTrue);
+      },
+    );
+
+    test('retention rejects a non-positive keep count', () async {
+      final fixture = await _BackupFixture.create();
+      addTearDown(fixture.dispose);
+
+      await expectLater(
+        fixture.service.pruneBackups(keep: 0),
+        throwsA(isA<ArgumentError>()),
+      );
+    });
+
+    test(
+      'retention can prune migration backups without deleting other purposes',
+      () async {
+        final fixture = await _BackupFixture.create();
+        addTearDown(fixture.dispose);
+        await fixture.writeDatabaseValue('purpose-filter');
+        final manual = await fixture.service.createBackup();
+        fixture.advance(const Duration(seconds: 1));
+        final safety = await fixture.service.createBackup(
+          purpose: BackupPurpose.safety,
+        );
+        final migrations = <BackupCreateResult>[];
+        for (var index = 0; index < 3; index += 1) {
+          fixture.advance(const Duration(seconds: 1));
+          migrations.add(
+            await fixture.service.createBackup(
+              purpose: BackupPurpose.migration,
+            ),
+          );
+        }
+
+        expect(
+          await fixture.service.pruneBackups(
+            keep: 1,
+            purposes: {BackupPurpose.migration},
+          ),
+          2,
+        );
+
+        expect(await manual.directory.exists(), isTrue);
+        expect(await safety.directory.exists(), isTrue);
+        expect(await migrations[0].directory.exists(), isFalse);
+        expect(await migrations[1].directory.exists(), isFalse);
+        expect(await migrations[2].directory.exists(), isTrue);
+      },
+    );
+
+    test(
+      'retention protects a newly created backup when the clock moves backward',
+      () async {
+        var timestamp = DateTime(2026, 8, 10, 10);
+        final fixture = await _BackupFixture.create(clock: () => timestamp);
+        addTearDown(fixture.dispose);
+        await fixture.writeDatabaseValue('clock-rollback');
+        for (var index = 0; index < 10; index += 1) {
+          await fixture.service.createBackup(purpose: BackupPurpose.migration);
+          timestamp = timestamp.add(const Duration(seconds: 1));
+        }
+        timestamp = DateTime(2026, 8, 9, 10);
+        final newlyCreated = await fixture.service.createBackup(
+          purpose: BackupPurpose.migration,
+        );
+
+        expect(
+          await fixture.service.pruneBackups(
+            keep: 10,
+            purposes: {BackupPurpose.migration},
+            protectedPaths: {
+              p.relative(
+                newlyCreated.directory.absolute.path,
+                from: Directory.current.path,
+              ),
+            },
+          ),
+          1,
+        );
+
+        expect(await newlyCreated.directory.exists(), isTrue);
+        expect(
+          await fixture.service.validateBackup(newlyCreated.directory),
+          isA<BackupManifest>(),
+        );
+        expect(await fixture.service.listBackups(), hasLength(10));
+      },
+    );
+
+    test(
+      'retention rejects more protected backups than the keep limit',
+      () async {
+        final fixture = await _BackupFixture.create();
+        addTearDown(fixture.dispose);
+        await fixture.writeDatabaseValue('protected-limit');
+        final first = await fixture.service.createBackup();
+        fixture.advance(const Duration(seconds: 1));
+        final second = await fixture.service.createBackup();
+
+        await expectLater(
+          fixture.service.pruneBackups(
+            keep: 1,
+            protectedPaths: {
+              first.directory.absolute.path,
+              second.directory.absolute.path,
+            },
+          ),
+          throwsA(isA<ArgumentError>()),
+        );
+
+        expect(await first.directory.exists(), isTrue);
+        expect(await second.directory.exists(), isTrue);
+      },
+    );
+
+    test('retention preserves a structurally invalid backup directory', () async {
+      final fixture = await _BackupFixture.create(
+        timestamp: DateTime(2026, 8, 9, 10),
+      );
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('safe');
+      final created = <BackupCreateResult>[];
+      for (var index = 0; index < 12; index += 1) {
+        created.add(await fixture.service.createBackup());
+        fixture.advance(const Duration(seconds: 1));
+      }
+      final corruptDirectory = created.first.directory;
+      final manifestFile = File(
+        '${corruptDirectory.path}${Platform.pathSeparator}backup_manifest.json',
+      );
+      final manifestJson =
+          (jsonDecode(await manifestFile.readAsString()) as Map)
+              .cast<String, Object?>();
+      manifestJson['appVersion'] = 42;
+      await manifestFile.writeAsString(jsonEncode(manifestJson));
+
+      expect(await fixture.service.pruneBackups(keep: 10), 1);
+
+      expect(await corruptDirectory.exists(), isTrue);
+      expect(await created[1].directory.exists(), isFalse);
+      expect(await created[2].directory.exists(), isTrue);
+    });
+
     test('rejects restore when sha256 validation fails', () async {
       final fixture = await _BackupFixture.create(
         timestamp: DateTime(2026, 5, 13, 9, 10, 11),
@@ -152,6 +595,153 @@ void main() {
         throwsA(isA<BackupValidationException>()),
       );
       expect(await fixture.readDatabaseValue(), 'current');
+    });
+
+    test('rejects a future schema before overwriting current files', () async {
+      final fixture = await _BackupFixture.create();
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('backup-version');
+      final backup = await fixture.service.createBackup();
+      final manifestFile = File(
+        '${backup.directory.path}${Platform.pathSeparator}backup_manifest.json',
+      );
+      final manifestJson =
+          (jsonDecode(await manifestFile.readAsString()) as Map)
+              .cast<String, Object?>();
+      manifestJson['schemaVersion'] = AppDatabase.currentSchemaVersion + 1;
+      await manifestFile.writeAsString(jsonEncode(manifestJson));
+      await fixture.writeDatabaseValue('current-version');
+
+      await expectLater(
+        fixture.service.restoreBackup(backup.directory),
+        throwsA(isA<BackupValidationException>()),
+      );
+      expect(await fixture.readDatabaseValue(), 'current-version');
+    });
+
+    test('cleanup failure cannot roll back a committed restore', () async {
+      var cleanupAttempts = 0;
+      final fixture = await _BackupFixture.create(
+        rollbackArtifactCleaner: (entity) async {
+          cleanupAttempts += 1;
+          throw FileSystemException('injected cleanup failure', entity.path);
+        },
+      );
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('backup-version');
+      final backup = await fixture.service.createBackup();
+      await fixture.writeDatabaseValue('current-version');
+
+      final restore = await fixture.service.restoreBackup(backup.directory);
+
+      expect(await fixture.readDatabaseValue(), 'backup-version');
+      expect(cleanupAttempts, greaterThan(0));
+      expect(restore.restoredBackupDirectory.path, backup.directory.path);
+    });
+
+    test('move-aside failure preserves every current workspace byte', () async {
+      final fixture = await _BackupFixture.create(
+        beforeMoveAside: (entity) async {
+          if (entity.path.endsWith('preferences.json')) {
+            throw FileSystemException('injected move failure', entity.path);
+          }
+        },
+      );
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('backup-version');
+      await fixture.workspaceService.saveWeeklyPromptTemplate(
+        'backup-template',
+      );
+      await fixture.writeLocalLibraryFile(
+        'library_manifest.json',
+        '{"documents":[{"id":"backup_doc","isDeleted":true}]}',
+      );
+      final backup = await fixture.service.createBackup();
+
+      await fixture.writeDatabaseValue('current-version');
+      await fixture.workspaceService.saveWeeklyPromptTemplate(
+        'current-template',
+      );
+      await fixture.writeLocalLibraryFile(
+        'library_manifest.json',
+        '{"documents":[{"id":"current_doc","isDeleted":true}]}',
+      );
+
+      await expectLater(
+        fixture.service.restoreBackup(backup.directory),
+        throwsA(isA<BackupRestoreException>()),
+      );
+
+      expect(await fixture.readDatabaseValue(), 'current-version');
+      expect(
+        await fixture.workspaceService.loadWeeklyPromptTemplate(),
+        'current-template',
+      );
+      expect(
+        await fixture.readLocalLibraryFile('library_manifest.json'),
+        '{"documents":[{"id":"current_doc","isDeleted":true}]}',
+      );
+    });
+
+    test('rollback continues after one cleanup step fails', () async {
+      final fixture = await _BackupFixture.create(
+        beforeRestoreCopy: (source, target) async {
+          if (target.path.endsWith('preferences.json')) {
+            throw FileSystemException('injected copy failure', target.path);
+          }
+        },
+        rollbackTargetCleaner: (target) async {
+          if (target.path.endsWith('research_life.sqlite')) {
+            throw FileSystemException(
+              'injected rollback cleanup failure',
+              target.path,
+            );
+          }
+          if (await target.exists()) {
+            await target.delete();
+          }
+        },
+      );
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('backup-version');
+      await fixture.workspaceService.saveWeeklyPromptTemplate(
+        'backup-template',
+      );
+      await fixture.writeLocalLibraryFile(
+        'library_manifest.json',
+        '{"documents":[{"id":"backup_doc","isDeleted":true}]}',
+      );
+      final backup = await fixture.service.createBackup();
+
+      await fixture.writeDatabaseValue('current-version');
+      await fixture.workspaceService.saveWeeklyPromptTemplate(
+        'current-template',
+      );
+      await fixture.writeLocalLibraryFile(
+        'library_manifest.json',
+        '{"documents":[{"id":"current_doc","isDeleted":true}]}',
+      );
+
+      await expectLater(
+        fixture.service.restoreBackup(backup.directory),
+        throwsA(
+          isA<BackupRestoreException>().having(
+            (error) => '$error',
+            'message',
+            contains('部分回滚失败'),
+          ),
+        ),
+      );
+
+      expect(
+        await fixture.workspaceService.loadWeeklyPromptTemplate(),
+        'current-template',
+      );
+      expect(
+        await fixture.readLocalLibraryFile('library_manifest.json'),
+        '{"documents":[{"id":"current_doc","isDeleted":true}]}',
+      );
+      expect(await fixture.readDatabaseValue(), 'current-version');
     });
 
     test('creates safety backup before restore', () async {
@@ -188,6 +778,28 @@ void main() {
       expect(_readDatabaseValue(safetyDatabase), 'current-version');
     });
 
+    test('restore retains only the newest ten safety backups', () async {
+      final fixture = await _BackupFixture.create();
+      addTearDown(fixture.dispose);
+      await fixture.writeDatabaseValue('restore-source');
+      final restoreSource = await fixture.service.createBackup();
+      for (var index = 0; index < 11; index += 1) {
+        fixture.advance(const Duration(seconds: 1));
+        await fixture.writeDatabaseValue('safety-$index');
+        await fixture.service.createBackup(purpose: BackupPurpose.safety);
+      }
+      fixture.advance(const Duration(seconds: 1));
+      await fixture.writeDatabaseValue('current');
+
+      await fixture.service.restoreBackup(restoreSource.directory);
+
+      final safetyBackups = (await fixture.service.listBackups())
+          .where((backup) => backup.purpose == BackupPurpose.safety)
+          .toList();
+      expect(safetyBackups, hasLength(10));
+      expect(await restoreSource.directory.exists(), isTrue);
+    });
+
     test('restores local PDF library files', () async {
       var timestamp = DateTime(2026, 5, 13, 9, 10, 11);
       final fixture = await _BackupFixture.create(clock: () => timestamp);
@@ -196,7 +808,7 @@ void main() {
       await fixture.workspaceService.saveWeeklyPromptTemplate('template');
       await fixture.writeLocalLibraryFile(
         'library_manifest.json',
-        '{"documents":[{"id":"backup_doc"}]}',
+        '{"documents":[{"id":"backup_doc","isDeleted":true}]}',
       );
       await fixture.writeLocalLibraryFile(
         'annotations.json',
@@ -207,7 +819,7 @@ void main() {
       await fixture.writeDatabaseValue('current-version');
       await fixture.writeLocalLibraryFile(
         'library_manifest.json',
-        '{"documents":[{"id":"current_doc"}]}',
+        '{"documents":[{"id":"current_doc","isDeleted":true}]}',
       );
       await fixture.writeLocalLibraryFile(
         'annotations.json',
@@ -220,7 +832,7 @@ void main() {
       expect(await fixture.readDatabaseValue(), 'backup-version');
       expect(
         await fixture.readLocalLibraryFile('library_manifest.json'),
-        '{"documents":[{"id":"backup_doc"}]}',
+        '{"documents":[{"id":"backup_doc","isDeleted":true}]}',
       );
       expect(
         await fixture.readLocalLibraryFile('annotations.json'),
@@ -244,17 +856,26 @@ class _BackupFixture {
     required this.workspaceService,
     required this.service,
     required this.workspaceDirectory,
-  });
+    required _MutableClock mutableClock,
+  }) : _mutableClock = mutableClock;
 
   final Directory tempDirectory;
   final LocalWorkspaceService workspaceService;
   final BackupService service;
   final Directory workspaceDirectory;
+  final _MutableClock _mutableClock;
 
   static Future<_BackupFixture> create({
     DateTime? timestamp,
     DateTime Function()? clock,
+    Future<void> Function(FileSystemEntity entity)? rollbackArtifactCleaner,
+    Future<void> Function(FileSystemEntity entity)? beforeMoveAside,
+    Future<void> Function(File source, File target)? beforeRestoreCopy,
+    Future<void> Function(File target)? rollbackTargetCleaner,
   }) async {
+    final mutableClock = _MutableClock(
+      timestamp ?? DateTime(2026, 5, 13, 9, 10, 11),
+    );
     final tempDirectory = await Directory.systemTemp.createTemp(
       'research_life_backup_service_test',
     );
@@ -264,15 +885,22 @@ class _BackupFixture {
     final workspaceDirectory = await workspaceService.resolveStorageDirectory();
     final service = BackupService(
       workspaceService: workspaceService,
-      clock: clock ?? () => timestamp ?? DateTime(2026, 5, 13, 9, 10, 11),
+      clock: clock ?? mutableClock.call,
+      rollbackArtifactCleaner: rollbackArtifactCleaner,
+      beforeMoveAside: beforeMoveAside,
+      beforeRestoreCopy: beforeRestoreCopy,
+      rollbackTargetCleaner: rollbackTargetCleaner,
     );
     return _BackupFixture(
       tempDirectory: tempDirectory,
       workspaceService: workspaceService,
       service: service,
       workspaceDirectory: workspaceDirectory,
+      mutableClock: mutableClock,
     );
   }
+
+  void advance(Duration duration) => _mutableClock.advance(duration);
 
   Future<void> writeDatabaseValue(String value) async {
     final databaseFile = await workspaceService.resolveDatabaseFile();
@@ -283,7 +911,29 @@ class _BackupFixture {
         ..execute('CREATE TABLE IF NOT EXISTS notes (value TEXT NOT NULL);')
         ..execute('DELETE FROM notes;')
         ..execute('INSERT INTO notes (value) VALUES (?);', [value])
+        ..execute('PRAGMA user_version = ${AppDatabase.currentSchemaVersion};')
         ..execute('PRAGMA wal_checkpoint(TRUNCATE);');
+    } finally {
+      database.close();
+    }
+  }
+
+  Future<void> writePreference(String key, String value) async {
+    final databaseFile = await workspaceService.resolveDatabaseFile();
+    final database = sqlite3.open(databaseFile.path);
+    try {
+      database.execute(
+        'CREATE TABLE IF NOT EXISTS preferences ('
+        '"key" TEXT NOT NULL PRIMARY KEY, '
+        '"value" TEXT NOT NULL, '
+        '"updated_at" INTEGER NOT NULL);',
+      );
+      database.execute(
+        'INSERT OR REPLACE INTO preferences '
+        '("key", "value", "updated_at") VALUES (?, ?, ?);',
+        [key, value, DateTime.now().millisecondsSinceEpoch],
+      );
+      database.execute('PRAGMA wal_checkpoint(TRUNCATE);');
     } finally {
       database.close();
     }
@@ -310,6 +960,18 @@ class _BackupFixture {
 
   Future<void> dispose() {
     return tempDirectory.delete(recursive: true);
+  }
+}
+
+class _MutableClock {
+  _MutableClock(this.value);
+
+  DateTime value;
+
+  DateTime call() => value;
+
+  void advance(Duration duration) {
+    value = value.add(duration);
   }
 }
 

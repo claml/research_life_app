@@ -126,39 +126,45 @@ class _AgentWorkspace extends StatelessWidget {
             ),
           ),
           child: SafeArea(
-            child: Row(
-              children: [
-                _HistoryRail(
-                  controller: controller,
-                  collapsed: sidebarCollapsed,
-                  onCollapse: onCollapseSidebar,
-                  onExpand: onExpandSidebar,
-                ),
-                Expanded(
-                  child: Column(
-                    children: [
-                      _AgentTopBar(
-                        controller: controller,
-                        onOpenSettings: onOpenSettings,
+            child: LayoutBuilder(
+              builder: (context, constraints) {
+                final narrow = constraints.maxWidth < 720;
+                return Row(
+                  children: [
+                    _HistoryRail(
+                      controller: controller,
+                      collapsed: narrow || sidebarCollapsed,
+                      onCollapse: onCollapseSidebar,
+                      onExpand: narrow ? null : onExpandSidebar,
+                    ),
+                    Expanded(
+                      child: Column(
+                        children: [
+                          _AgentTopBar(
+                            controller: controller,
+                            narrow: narrow,
+                            onOpenSettings: onOpenSettings,
+                          ),
+                          Expanded(
+                            child: _ConversationSurface(
+                              controller: controller,
+                              scrollController: scrollController,
+                              onOpenSettings: onOpenSettings,
+                            ),
+                          ),
+                          if (controller.error != null || controller.canRetry)
+                            _AgentErrorBanner(controller: controller),
+                          _Composer(
+                            controller: inputController,
+                            sending: controller.sending,
+                            onSend: onSend,
+                          ),
+                        ],
                       ),
-                      Expanded(
-                        child: _ConversationSurface(
-                          controller: controller,
-                          scrollController: scrollController,
-                          onOpenSettings: onOpenSettings,
-                        ),
-                      ),
-                      if (controller.error != null || controller.canRetry)
-                        _AgentErrorBanner(controller: controller),
-                      _Composer(
-                        controller: inputController,
-                        sending: controller.sending,
-                        onSend: onSend,
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+                    ),
+                  ],
+                );
+              },
             ),
           ),
         );
@@ -168,9 +174,14 @@ class _AgentWorkspace extends StatelessWidget {
 }
 
 class _AgentTopBar extends StatelessWidget {
-  const _AgentTopBar({required this.controller, required this.onOpenSettings});
+  const _AgentTopBar({
+    required this.controller,
+    required this.narrow,
+    required this.onOpenSettings,
+  });
 
   final AgentController controller;
+  final bool narrow;
   final VoidCallback onOpenSettings;
 
   @override
@@ -179,7 +190,7 @@ class _AgentTopBar extends StatelessWidget {
     final profile = controller.profile;
     return Container(
       height: 64,
-      padding: const EdgeInsets.symmetric(horizontal: 22),
+      padding: EdgeInsets.symmetric(horizontal: narrow ? 12 : 22),
       decoration: BoxDecoration(
         color: tokens.panelSurface.withValues(alpha: 0.78),
         border: Border(bottom: BorderSide(color: tokens.borderFaint)),
@@ -196,28 +207,40 @@ class _AgentTopBar extends StatelessWidget {
           ],
           Icon(Icons.auto_awesome_rounded, color: tokens.accent, size: 20),
           const SizedBox(width: 10),
-          Text(
-            'AI 助手',
-            style: Theme.of(
-              context,
-            ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+          Expanded(
+            child: Text(
+              'AI 助手',
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
+            ),
           ),
-          const Spacer(),
           if (profile != null)
-            Container(
-              key: const Key('agent-model-chip'),
-              padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
-              decoration: BoxDecoration(
-                color: tokens.accentSoft,
-                borderRadius: BorderRadius.circular(999),
-                border: Border.all(color: tokens.accent.withValues(alpha: 0.3)),
-              ),
-              child: Text(
-                '${profile.displayName} · ${profile.model}',
-                style: TextStyle(
-                  color: tokens.accent,
-                  fontSize: 12,
-                  fontWeight: FontWeight.w600,
+            Flexible(
+              child: Container(
+                key: const Key('agent-model-chip'),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 11,
+                  vertical: 6,
+                ),
+                decoration: BoxDecoration(
+                  color: tokens.accentSoft,
+                  borderRadius: BorderRadius.circular(999),
+                  border: Border.all(
+                    color: tokens.accent.withValues(alpha: 0.3),
+                  ),
+                ),
+                child: Text(
+                  '${profile.displayName} · ${profile.model}',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    color: tokens.accent,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
@@ -245,7 +268,7 @@ class _HistoryRail extends StatelessWidget {
   final AgentController controller;
   final bool collapsed;
   final VoidCallback onCollapse;
-  final VoidCallback onExpand;
+  final VoidCallback? onExpand;
 
   @override
   Widget build(BuildContext context) {
@@ -262,13 +285,15 @@ class _HistoryRail extends StatelessWidget {
               alignment: Alignment.topCenter,
               child: Padding(
                 padding: const EdgeInsets.only(top: 12),
-                child: IconButton(
-                  key: const Key('agent-expand-history'),
-                  tooltip: '展开历史记录',
-                  onPressed: onExpand,
-                  color: Colors.white70,
-                  icon: const Icon(Icons.chevron_right_rounded),
-                ),
+                child: onExpand == null
+                    ? const Icon(Icons.history_rounded, color: Colors.white70)
+                    : IconButton(
+                        key: const Key('agent-expand-history'),
+                        tooltip: '展开历史记录',
+                        onPressed: onExpand,
+                        color: Colors.white70,
+                        icon: const Icon(Icons.chevron_right_rounded),
+                      ),
               ),
             )
           : Column(

@@ -5,25 +5,141 @@ import 'package:crypto/crypto.dart';
 import 'package:sqlite3/sqlite3.dart';
 
 import '../database/app_database.dart';
+import '../database/repositories/preferences_repository.dart';
 import 'backup_manifest.dart';
+import 'local_data_operation_coordinator.dart';
 import 'local_workspace_service.dart';
 
 class BackupService {
-  const BackupService({
+  BackupService({
     required LocalWorkspaceService workspaceService,
     this.appVersion = '0.1.0+1',
     this.schemaVersion = AppDatabase.currentSchemaVersion,
     DateTime Function()? clock,
+    LocalDataOperationCoordinator? operationCoordinator,
+    Future<void> Function(FileSystemEntity entity)? rollbackArtifactCleaner,
+    Future<void> Function(FileSystemEntity entity)? beforeMoveAside,
+    Future<void> Function(File source, File target)? beforeRestoreCopy,
+    Future<void> Function(File target)? rollbackTargetCleaner,
   }) : _workspaceService = workspaceService,
-       _clock = clock;
+       _clock = clock,
+       _operationCoordinator =
+           operationCoordinator ?? LocalDataOperationCoordinator(),
+       _rollbackArtifactCleaner = rollbackArtifactCleaner,
+       _beforeMoveAside = beforeMoveAside,
+       _beforeRestoreCopy = beforeRestoreCopy,
+       _rollbackTargetCleaner = rollbackTargetCleaner;
 
   final LocalWorkspaceService _workspaceService;
   final String appVersion;
   final int schemaVersion;
   final DateTime Function()? _clock;
+  final LocalDataOperationCoordinator _operationCoordinator;
+  final Future<void> Function(FileSystemEntity entity)?
+  _rollbackArtifactCleaner;
+  final Future<void> Function(FileSystemEntity entity)? _beforeMoveAside;
+  final Future<void> Function(File source, File target)? _beforeRestoreCopy;
+  final Future<void> Function(File target)? _rollbackTargetCleaner;
 
-  Future<BackupCreateResult> createBackup() {
-    return _createBackup(createdAt: _now(), requireDatabase: true);
+  Future<BackupCreateResult> createBackup({
+    BackupPurpose purpose = BackupPurpose.manual,
+  }) {
+    return _operationCoordinator.runExclusive(
+      () => _createBackup(
+        createdAt: _now(),
+        requireDatabase: true,
+        purpose: purpose,
+      ),
+    );
+  }
+
+  Future<List<BackupCreateResult>> listBackups() async {
+    final backupsDirectory = await _workspaceService.resolveBackupsDirectory();
+    final backups = <BackupCreateResult>[];
+    await for (final entity in backupsDirectory.list(followLinks: false)) {
+      if (entity is! Directory ||
+          _pathName(entity.path).startsWith('.pending-')) {
+        continue;
+      }
+      try {
+        final manifest = await validateBackup(entity);
+        backups.add(
+          BackupCreateResult(
+            directory: entity,
+            manifest: manifest,
+            purpose: manifest.purpose,
+          ),
+        );
+      } on BackupException {
+        continue;
+      } on FileSystemException {
+        continue;
+      }
+    }
+    backups.sort((left, right) {
+      final byCreatedAt = right.manifest.createdAt.compareTo(
+        left.manifest.createdAt,
+      );
+      if (byCreatedAt != 0) {
+        return byCreatedAt;
+      }
+      return right.directory.path.compareTo(left.directory.path);
+    });
+    return backups;
+  }
+
+  Future<int> pruneBackups({
+    int keep = 10,
+    Set<BackupPurpose>? purposes,
+    Set<String> protectedPaths = const {},
+  }) async {
+    if (keep < 1) {
+      throw ArgumentError.value(keep, 'keep');
+    }
+    final backups = await listBackups();
+    final candidates =
+        (purposes == null
+                ? backups
+                : backups.where((backup) => purposes.contains(backup.purpose)))
+            .toList();
+    final normalizedProtectedPaths = protectedPaths
+        .map(_normalizedDirectoryPath)
+        .toSet();
+    final protected = candidates
+        .where(
+          (backup) => normalizedProtectedPaths.contains(
+            _normalizedDirectoryPath(backup.directory.path),
+          ),
+        )
+        .toList();
+    if (protected.length > keep) {
+      throw ArgumentError.value(
+        protectedPaths,
+        'protectedPaths',
+        'Matched protected backups cannot exceed keep.',
+      );
+    }
+    final unprotected = candidates
+        .where(
+          (backup) => !normalizedProtectedPaths.contains(
+            _normalizedDirectoryPath(backup.directory.path),
+          ),
+        )
+        .toList();
+    final unprotectedToKeep = keep > protected.length
+        ? keep - protected.length
+        : 0;
+    var removed = 0;
+    for (final backup in unprotected.skip(unprotectedToKeep)) {
+      await backup.directory.delete(recursive: true);
+      removed += 1;
+    }
+    return removed;
+  }
+
+  String _normalizedDirectoryPath(String path) {
+    final absolute = Directory(path).absolute.path;
+    return Platform.isWindows ? absolute.toLowerCase() : absolute;
   }
 
   Future<BackupManifest> validateBackup(Directory backupDirectory) async {
@@ -40,8 +156,14 @@ class BackupService {
         '不支持的备份 manifestVersion：${manifest.manifestVersion}。',
       );
     }
+    if (manifest.schemaVersion > schemaVersion) {
+      throw BackupValidationException(
+        '备份数据库版本 ${manifest.schemaVersion} 高于当前支持版本 $schemaVersion。',
+      );
+    }
 
     await _validateFileInfo(backupDirectory, manifest.databaseFile);
+    await _validateDatabaseSchema(backupDirectory, manifest);
     await _validateFileInfo(backupDirectory, manifest.preferencesFile);
     final workspaceManifestFile = manifest.workspaceManifestFile;
     if (workspaceManifestFile != null) {
@@ -53,16 +175,78 @@ class BackupService {
         _localFileLibraryRelativePath(fileInfo.path);
         await _validateFileInfo(backupDirectory, fileInfo);
       }
+      await _validateManagedFileReferences(
+        backupDirectory,
+        localFileLibraryFiles,
+      );
     }
     return manifest;
   }
 
-  Future<BackupRestoreResult> restoreBackup(Directory backupDirectory) async {
+  Future<void> _validateManagedFileReferences(
+    Directory backupDirectory,
+    List<BackupFileInfo> localFiles,
+  ) async {
+    const manifestPath = 'local_files/library_manifest.json';
+    if (!localFiles.any((info) => info.path == manifestPath)) {
+      return;
+    }
+    final manifestFile = _fileInBackup(backupDirectory, manifestPath);
+    try {
+      final decoded = jsonDecode(await manifestFile.readAsString());
+      if (decoded is! Map || decoded['documents'] is! List) {
+        throw const FormatException('library manifest is invalid');
+      }
+      final copiedPaths = localFiles.map((info) => info.path).toSet();
+      for (final raw in (decoded['documents'] as List).whereType<Map>()) {
+        if (raw['isDeleted'] == true || raw['cloudOnly'] == true) {
+          continue;
+        }
+        final storedPath = '${raw['path'] ?? ''}'.replaceAll('\\', '/');
+        if (storedPath.isEmpty) {
+          throw const BackupValidationException('资料清单包含没有文件路径的活动记录');
+        }
+        final isAbsoluteWindowsPath = RegExp(
+          r'^[A-Za-z]:/',
+        ).hasMatch(storedPath);
+        if (storedPath.startsWith('/') || isAbsoluteWindowsPath) {
+          throw BackupValidationException('资料清单仍包含工作区外的绝对路径：$storedPath');
+        }
+        if (!storedPath.startsWith('payloads/') ||
+            storedPath.split('/').contains('..')) {
+          throw BackupValidationException('资料清单路径非法：$storedPath');
+        }
+        final expectedBackupPath = 'local_files/$storedPath';
+        if (!copiedPaths.contains(expectedBackupPath)) {
+          throw BackupValidationException('备份缺少资料实体文件：$expectedBackupPath');
+        }
+      }
+    } on FormatException catch (error) {
+      throw BackupValidationException('资料清单无效：${error.message}');
+    }
+  }
+
+  Future<BackupRestoreResult> restoreBackup(Directory backupDirectory) {
+    return _operationCoordinator.runExclusive(
+      () => _restoreBackup(backupDirectory),
+    );
+  }
+
+  Future<BackupRestoreResult> _restoreBackup(Directory backupDirectory) async {
     final manifest = await validateBackup(backupDirectory);
     final safetyBackup = await _createBackup(
       createdAt: _now(),
       requireDatabase: true,
       purpose: BackupPurpose.safety,
+    );
+    await validateBackup(safetyBackup.directory);
+    await pruneBackups(
+      keep: 10,
+      purposes: const {BackupPurpose.safety},
+      protectedPaths: {
+        safetyBackup.directory.absolute.path,
+        backupDirectory.absolute.path,
+      },
     );
 
     final workspaceDirectory = await _workspaceService
@@ -96,6 +280,8 @@ class BackupService {
 
     final rollbackFiles = <_RollbackFile>[];
     _RollbackDirectory? localFileLibraryRollback;
+    final installStartedTargets = <File>{};
+    var localFileLibraryInstallStarted = false;
     try {
       await workspaceDirectory.create(recursive: true);
       final sidecars = [
@@ -125,10 +311,13 @@ class BackupService {
 
       for (final item in restorePlan) {
         await item.target.parent.create(recursive: true);
+        installStartedTargets.add(item.target);
+        await _beforeRestoreCopy?.call(item.source, item.target);
         await item.source.copy(item.target.path);
       }
 
       if (localFileLibraryFiles != null) {
+        localFileLibraryInstallStarted = true;
         await localFileLibraryDirectory.create(recursive: true);
         for (final fileInfo in localFileLibraryFiles) {
           final relativePath = _localFileLibraryRelativePath(fileInfo.path);
@@ -140,38 +329,76 @@ class BackupService {
           await _fileInBackup(backupDirectory, fileInfo.path).copy(target.path);
         }
       }
+    } catch (error, stackTrace) {
+      Object? rollbackFailure;
+      StackTrace? rollbackStackTrace;
+      void recordRollbackFailure(Object failure, StackTrace failureStack) {
+        rollbackFailure ??= failure;
+        rollbackStackTrace ??= failureStack;
+      }
 
-      for (final rollback in rollbackFiles) {
-        await _deleteIfExists(rollback.rollback);
-      }
-      if (localFileLibraryRollback != null) {
-        await _deleteDirectoryIfExists(localFileLibraryRollback.rollback);
-      }
-
-      return BackupRestoreResult(
-        restoredBackupDirectory: backupDirectory,
-        safetyBackup: safetyBackup,
-      );
-    } catch (error) {
-      for (final item in restorePlan) {
-        await _deleteIfExists(item.target);
-      }
-      if (manifest.localFileLibraryFiles != null) {
-        await _deleteDirectoryIfExists(localFileLibraryDirectory);
-      }
-      for (final rollback in rollbackFiles.reversed) {
-        if (await rollback.rollback.exists()) {
-          await rollback.rollback.rename(rollback.original.path);
+      for (final target in installStartedTargets) {
+        try {
+          final cleaner = _rollbackTargetCleaner;
+          if (cleaner != null) {
+            await cleaner(target);
+          } else {
+            await _deleteIfExists(target);
+          }
+        } catch (failure, failureStack) {
+          recordRollbackFailure(failure, failureStack);
         }
       }
-      if (localFileLibraryRollback != null &&
-          await localFileLibraryRollback.rollback.exists()) {
-        await localFileLibraryRollback.rollback.rename(
-          localFileLibraryRollback.original.path,
-        );
+      if (localFileLibraryInstallStarted) {
+        try {
+          await _deleteDirectoryIfExists(localFileLibraryDirectory);
+        } catch (failure, failureStack) {
+          recordRollbackFailure(failure, failureStack);
+        }
       }
-      throw BackupRestoreException('恢复备份失败，已尝试回滚当前文件：$error');
+      for (final rollback in rollbackFiles.reversed) {
+        try {
+          if (await rollback.rollback.exists()) {
+            await rollback.rollback.rename(rollback.original.path);
+          }
+        } catch (failure, failureStack) {
+          recordRollbackFailure(failure, failureStack);
+        }
+      }
+      try {
+        if (localFileLibraryRollback != null &&
+            await localFileLibraryRollback.rollback.exists()) {
+          await localFileLibraryRollback.rollback.rename(
+            localFileLibraryRollback.original.path,
+          );
+        }
+      } catch (failure, failureStack) {
+        recordRollbackFailure(failure, failureStack);
+      }
+      final rollbackDetail = rollbackFailure == null
+          ? ''
+          : '；部分回滚失败：$rollbackFailure';
+      Error.throwWithStackTrace(
+        BackupRestoreException('恢复备份失败，已尝试回滚全部当前文件：$error$rollbackDetail'),
+        rollbackFailure == null ? stackTrace : rollbackStackTrace!,
+      );
     }
+
+    // The new snapshot is committed once every target copy succeeds. Cleanup
+    // is deliberately best-effort and outside the rollback catch: deleting
+    // one rollback artifact must never make a later cleanup failure erase the
+    // already committed restore.
+    for (final rollback in rollbackFiles) {
+      await _cleanupRollbackArtifact(rollback.rollback);
+    }
+    if (localFileLibraryRollback != null) {
+      await _cleanupRollbackArtifact(localFileLibraryRollback.rollback);
+    }
+
+    return BackupRestoreResult(
+      restoredBackupDirectory: backupDirectory,
+      safetyBackup: safetyBackup,
+    );
   }
 
   Future<BackupCreateResult> _createBackup({
@@ -202,7 +429,7 @@ class BackupService {
       );
     }
 
-    final backupDirectory = await _createTimestampedBackupDirectory(createdAt);
+    final backupDirectory = await _createPendingBackupDirectory(createdAt);
     final databaseTarget = File(
       '${backupDirectory.path}${Platform.pathSeparator}research_life.sqlite',
     );
@@ -213,60 +440,91 @@ class BackupService {
       '${backupDirectory.path}${Platform.pathSeparator}workspace_manifest.json',
     );
 
-    await databaseFile.copy(databaseTarget.path);
-    await preferencesFile.copy(preferencesTarget.path);
+    try {
+      await databaseFile.copy(databaseTarget.path);
+      await preferencesFile.copy(preferencesTarget.path);
+      await _sanitizeBackupDatabase(databaseTarget);
+      await _sanitizeBackupPreferences(preferencesTarget);
 
-    BackupFileInfo? workspaceManifestInfo;
-    if (await workspaceManifestFile.exists()) {
-      await workspaceManifestFile.copy(workspaceManifestTarget.path);
-      workspaceManifestInfo = await _fileInfo(
-        workspaceManifestTarget,
-        'workspace_manifest.json',
+      BackupFileInfo? workspaceManifestInfo;
+      if (await workspaceManifestFile.exists()) {
+        await workspaceManifestFile.copy(workspaceManifestTarget.path);
+        workspaceManifestInfo = await _fileInfo(
+          workspaceManifestTarget,
+          'workspace_manifest.json',
+        );
+      }
+      final localFileLibraryFiles = await _copyDirectoryToBackup(
+        source: localFileLibraryDirectory,
+        backupDirectory: backupDirectory,
+        relativeRoot: 'local_files',
       );
+
+      final manifest = BackupManifest(
+        purpose: purpose,
+        appVersion: appVersion,
+        createdAt: createdAt,
+        schemaVersion: schemaVersion,
+        workspacePath: workspaceDirectory.path,
+        databaseFile: await _fileInfo(databaseTarget, 'research_life.sqlite'),
+        preferencesFile: await _fileInfo(preferencesTarget, 'preferences.json'),
+        workspaceManifestFile: workspaceManifestInfo,
+        localFileLibraryFiles: localFileLibraryFiles,
+      );
+      final manifestFile = File(
+        '${backupDirectory.path}${Platform.pathSeparator}backup_manifest.json',
+      );
+      await manifestFile.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(manifest.toJson()),
+      );
+      await validateBackup(backupDirectory);
+      final publishedDirectory = await _publishPendingDirectory(
+        backupDirectory,
+        createdAt,
+      );
+
+      return BackupCreateResult(
+        directory: publishedDirectory,
+        manifest: manifest,
+        purpose: purpose,
+      );
+    } catch (error, stackTrace) {
+      try {
+        if (await backupDirectory.exists()) {
+          await backupDirectory.delete(recursive: true);
+        }
+      } catch (_) {
+        // Preserve the original backup failure. A stale pending directory is
+        // ignored by listing and retention and can be inspected manually.
+      }
+      Error.throwWithStackTrace(error, stackTrace);
     }
-    final localFileLibraryFiles = await _copyDirectoryToBackup(
-      source: localFileLibraryDirectory,
-      backupDirectory: backupDirectory,
-      relativeRoot: 'local_files',
-    );
-
-    final manifest = BackupManifest(
-      appVersion: appVersion,
-      createdAt: createdAt,
-      schemaVersion: schemaVersion,
-      workspacePath: workspaceDirectory.path,
-      databaseFile: await _fileInfo(databaseTarget, 'research_life.sqlite'),
-      preferencesFile: await _fileInfo(preferencesTarget, 'preferences.json'),
-      workspaceManifestFile: workspaceManifestInfo,
-      localFileLibraryFiles: localFileLibraryFiles,
-    );
-    final manifestFile = File(
-      '${backupDirectory.path}${Platform.pathSeparator}backup_manifest.json',
-    );
-    await manifestFile.writeAsString(
-      const JsonEncoder.withIndent('  ').convert(manifest.toJson()),
-    );
-
-    return BackupCreateResult(
-      directory: backupDirectory,
-      manifest: manifest,
-      purpose: purpose,
-    );
   }
 
-  Future<Directory> _createTimestampedBackupDirectory(
+  Future<Directory> _createPendingBackupDirectory(DateTime createdAt) async {
+    final backupsDirectory = await _workspaceService.resolveBackupsDirectory();
+    final timestamp = _formatBackupTimestamp(createdAt);
+    return backupsDirectory.createTemp('.pending-$timestamp-');
+  }
+
+  Future<Directory> _publishPendingDirectory(
+    Directory pending,
     DateTime createdAt,
   ) async {
-    final backupsDirectory = await _workspaceService.resolveBackupsDirectory();
+    final backupsDirectory = pending.parent;
     var candidateTime = createdAt;
     for (var attempts = 0; attempts < 10000; attempts += 1) {
-      final candidate = Directory(
+      final timestamp = _formatBackupTimestamp(candidateTime);
+      final published = Directory(
         '${backupsDirectory.path}${Platform.pathSeparator}'
-        '${_formatBackupTimestamp(candidateTime)}',
+        '$timestamp',
       );
-      if (!await candidate.exists()) {
-        await candidate.create(recursive: true);
-        return candidate;
+      try {
+        return await pending.rename(published.path);
+      } on FileSystemException {
+        if (!await published.exists()) {
+          rethrow;
+        }
       }
       candidateTime = candidateTime.add(const Duration(seconds: 1));
     }
@@ -350,6 +608,96 @@ class BackupService {
     return digest.toString();
   }
 
+  Future<void> _validateDatabaseSchema(
+    Directory backupDirectory,
+    BackupManifest manifest,
+  ) async {
+    final databaseFile = _fileInBackup(
+      backupDirectory,
+      manifest.databaseFile.path,
+    );
+    try {
+      final database = sqlite3.open(databaseFile.path, mode: OpenMode.readOnly);
+      try {
+        final rows = database.select('PRAGMA user_version;');
+        final actual = rows.isEmpty
+            ? null
+            : _intValue(rows.first['user_version']);
+        if (actual != manifest.schemaVersion) {
+          throw BackupValidationException(
+            '备份数据库版本与清单不一致：数据库 $actual，清单 ${manifest.schemaVersion}。',
+          );
+        }
+      } finally {
+        database.close();
+      }
+    } on BackupValidationException {
+      rethrow;
+    } catch (error) {
+      throw BackupValidationException('无法读取备份数据库版本：$error');
+    }
+  }
+
+  Future<void> _sanitizeBackupDatabase(File databaseFile) async {
+    final database = sqlite3.open(databaseFile.path);
+    try {
+      database.execute('PRAGMA secure_delete = ON;');
+      final preferencesTable = database.select(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'preferences';",
+      );
+      if (preferencesTable.isEmpty) {
+        return;
+      }
+      database.execute('DELETE FROM preferences WHERE "key" IN (?, ?, ?);', [
+        PreferencesRepository.agentLlmSettingsKey,
+        PreferencesRepository.remoteLlmAnalysisSettingsKey,
+        PreferencesRepository.weatherApiKeyKey,
+      ]);
+      database.execute('VACUUM;');
+      database.execute('PRAGMA wal_checkpoint(TRUNCATE);');
+    } finally {
+      database.close();
+    }
+  }
+
+  Future<void> _sanitizeBackupPreferences(File preferencesFile) async {
+    try {
+      final decoded = jsonDecode(await preferencesFile.readAsString());
+      if (decoded is! Map) {
+        return;
+      }
+      final sanitized = Map<String, Object?>.from(decoded.cast());
+      sanitized
+        ..remove(PreferencesRepository.agentLlmSettingsKey)
+        ..remove(PreferencesRepository.remoteLlmAnalysisSettingsKey)
+        ..remove(PreferencesRepository.weatherApiKeyKey);
+      await preferencesFile.writeAsString(
+        const JsonEncoder.withIndent('  ').convert(sanitized),
+      );
+    } on FormatException {
+      // Structural validation remains responsible for malformed preference
+      // files. Sanitization is intentionally limited to recognized JSON maps.
+    }
+  }
+
+  Future<void> _cleanupRollbackArtifact(FileSystemEntity entity) async {
+    try {
+      final cleaner = _rollbackArtifactCleaner;
+      if (cleaner != null) {
+        await cleaner(entity);
+        return;
+      }
+      if (entity is File) {
+        await _deleteIfExists(entity);
+      } else if (entity is Directory) {
+        await _deleteDirectoryIfExists(entity);
+      }
+    } catch (_) {
+      // Restore has already committed. Keep the rollback artifact for manual
+      // cleanup rather than attempting a partial rollback of the new snapshot.
+    }
+  }
+
   Future<void> _checkpointSqliteWal(File databaseFile) async {
     try {
       final database = sqlite3.open(databaseFile.path);
@@ -375,6 +723,8 @@ class BackupService {
       return null;
     }
 
+    await _beforeMoveAside?.call(file);
+
     final rollbackFile = File(
       '${file.path}.pre_restore_${DateTime.now().microsecondsSinceEpoch}',
     );
@@ -388,6 +738,8 @@ class BackupService {
     if (!await directory.exists()) {
       return null;
     }
+
+    await _beforeMoveAside?.call(directory);
 
     final rollbackDirectory = Directory(
       '${directory.path}.pre_restore_${DateTime.now().microsecondsSinceEpoch}',
@@ -454,6 +806,10 @@ class BackupService {
         '${twoDigits(timestamp.minute)}'
         '${twoDigits(timestamp.second)}';
   }
+
+  String _pathName(String path) {
+    return path.replaceAll('\\', '/').split('/').last;
+  }
 }
 
 int? _intValue(Object? value) {
@@ -468,8 +824,6 @@ int? _intValue(Object? value) {
   }
   return null;
 }
-
-enum BackupPurpose { manual, safety }
 
 class BackupCreateResult {
   const BackupCreateResult({

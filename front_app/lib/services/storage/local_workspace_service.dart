@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 
 typedef StorageDirectoryResolver = Future<Directory> Function();
@@ -30,6 +31,7 @@ class LocalWorkspaceService {
   static const _databaseFileName = 'research_life.sqlite';
   static const _workspaceManifestFileName = 'workspace_manifest.json';
   static const _localFileLibraryFolderName = 'local_files';
+  static const _managedFilePayloadsFolderName = 'payloads';
   static const _backupsFolderName = 'backups';
   static const _databaseBackupsFolderName = 'database_backups';
   static const _customPetsFolderName = 'pets';
@@ -79,6 +81,30 @@ class LocalWorkspaceService {
     final directory = Directory(
       '${storageDirectory.path}${Platform.pathSeparator}$_localFileLibraryFolderName',
     );
+    if (create) {
+      await directory.create(recursive: true);
+    }
+    return directory;
+  }
+
+  Future<Directory> resolveManagedFilePayloadsDirectory({
+    String? category,
+    bool create = true,
+  }) async {
+    final libraryDirectory = await resolveLocalFileLibraryDirectory(
+      create: create,
+    );
+    var directory = Directory(
+      '${libraryDirectory.path}${Platform.pathSeparator}'
+      '$_managedFilePayloadsFolderName',
+    );
+    if (category != null) {
+      final safeCategory = _safePathSegment(category);
+      directory = Directory(
+        '${directory.path}${Platform.pathSeparator}'
+        '${safeCategory.isEmpty ? _defaultPdfCategory : safeCategory}',
+      );
+    }
     if (create) {
       await directory.create(recursive: true);
     }
@@ -171,12 +197,26 @@ class LocalWorkspaceService {
   Future<File> copyFileIntoMaterials(
     File source, {
     String category = _defaultPdfCategory,
+    bool reuseIdenticalFile = true,
+  }) async {
+    final result = await copyFileIntoMaterialsWithResult(
+      source,
+      category: category,
+      reuseIdenticalFile: reuseIdenticalFile,
+    );
+    return result.file;
+  }
+
+  Future<({File file, bool created})> copyFileIntoMaterialsWithResult(
+    File source, {
+    String category = _defaultPdfCategory,
+    bool reuseIdenticalFile = true,
   }) async {
     if (!await source.exists()) {
       throw FileSystemException('文件不存在', source.path);
     }
 
-    final materialsDirectory = await resolveMaterialsDirectory(
+    final materialsDirectory = await resolveManagedFilePayloadsDirectory(
       category: category,
     );
     final sourceFileName = _fileNameFromPath(source.path);
@@ -188,16 +228,194 @@ class LocalWorkspaceService {
     );
 
     if (_normalizePath(source.path) == _normalizePath(target.path)) {
+      return (file: source, created: false);
+    }
+    if (await target.exists()) {
+      if (reuseIdenticalFile && await _hasSameFileContent(source, target)) {
+        return (file: target, created: false);
+      }
+      final availableTarget = await _nextAvailableFile(target);
+      return (file: await source.copy(availableTarget.path), created: true);
+    }
+    return (file: await source.copy(target.path), created: true);
+  }
+
+  Future<bool> isManagedFilePath(String path) async {
+    final payloadsDirectory = await resolveManagedFilePayloadsDirectory(
+      create: false,
+    );
+    final root = _normalizePath(payloadsDirectory.absolute.path);
+    final candidate = _normalizePath(File(path).absolute.path);
+    return candidate.startsWith('$root\\');
+  }
+
+  Future<File> resolveManagedFileOperationJournalFile() async {
+    final library = await resolveLocalFileLibraryDirectory();
+    return File(
+      '${library.path}${Platform.pathSeparator}.managed_file_operation.json',
+    );
+  }
+
+  Future<String> portableManagedFilePath(String filePath) async {
+    final payloads = await resolveManagedFilePayloadsDirectory(create: false);
+    final absolutePayloads = p.normalize(p.absolute(payloads.path));
+    final absoluteFile = p.normalize(p.absolute(filePath));
+    if (!p.isWithin(absolutePayloads, absoluteFile)) {
+      throw FileSystemException('文件不在工作台管理目录内', filePath);
+    }
+    final library = await resolveLocalFileLibraryDirectory(create: false);
+    final relative = p.relative(absoluteFile, from: p.absolute(library.path));
+    return p.posix.joinAll(p.split(relative));
+  }
+
+  Future<File> resolveManagedPortableFile(String storedPath) async {
+    final normalized = p.posix.normalize(storedPath.replaceAll('\\', '/'));
+    if (!normalized.startsWith('payloads/') ||
+        normalized.split('/').any((segment) => segment == '..')) {
+      throw FileSystemException('无效的工作台文件路径', storedPath);
+    }
+    final library = await resolveLocalFileLibraryDirectory(create: false);
+    final resolved = File(p.joinAll([library.path, ...normalized.split('/')]));
+    if (!await isManagedFilePath(resolved.path)) {
+      throw FileSystemException('工作台文件路径越界', storedPath);
+    }
+    return resolved;
+  }
+
+  Future<void> writeManagedFileOperationJournal({
+    required String type,
+    required String documentId,
+    required File original,
+    required File target,
+  }) async {
+    final journal = await resolveManagedFileOperationJournalFile();
+    final pending = File('${journal.path}.pending');
+    if (await pending.exists()) {
+      await pending.delete();
+    }
+    await pending.writeAsString(
+      jsonEncode({
+        'version': 1,
+        'type': type,
+        'documentId': documentId,
+        'originalPath': await portableManagedFilePath(original.path),
+        'targetPath': await portableManagedFilePath(target.path),
+      }),
+      flush: true,
+    );
+    if (await journal.exists()) {
+      await journal.delete();
+    }
+    await pending.rename(journal.path);
+  }
+
+  Future<void> clearManagedFileOperationJournal() async {
+    final journal = await resolveManagedFileOperationJournalFile();
+    final pending = File('${journal.path}.pending');
+    if (await journal.exists()) {
+      await journal.delete();
+    }
+    if (await pending.exists()) {
+      await pending.delete();
+    }
+  }
+
+  Future<File> resolveManagedRenameTarget(File source, String title) async {
+    if (!await source.exists()) {
+      throw FileSystemException('文件不存在', source.path);
+    }
+    if (!await isManagedFilePath(source.path)) {
+      throw FileSystemException('只能重命名工作台管理的文件', source.path);
+    }
+    final extensionIndex = source.path.lastIndexOf('.');
+    final separatorIndex = source.path.lastIndexOf(Platform.pathSeparator);
+    final extension = extensionIndex > separatorIndex
+        ? source.path.substring(extensionIndex)
+        : '';
+    var safeTitle = _safeFileName(title);
+    if (extension.isNotEmpty &&
+        safeTitle.toLowerCase().endsWith(extension.toLowerCase())) {
+      safeTitle = safeTitle.substring(0, safeTitle.length - extension.length);
+    }
+    if (safeTitle.trim().isEmpty) {
+      throw const FileSystemException('文件名不能为空');
+    }
+    final target = File(
+      '${source.parent.path}${Platform.pathSeparator}$safeTitle$extension',
+    );
+    if (_normalizePath(source.path) != _normalizePath(target.path) &&
+        await target.exists()) {
+      throw FileSystemException('同名文件已存在', target.path);
+    }
+    return target;
+  }
+
+  Future<File> resolveManagedDeletionStagingFile(File source) async {
+    if (!await isManagedFilePath(source.path)) {
+      throw FileSystemException('只能删除工作台管理的文件', source.path);
+    }
+    return File(
+      '${source.parent.path}${Platform.pathSeparator}'
+      '.deleting-${DateTime.now().microsecondsSinceEpoch}-'
+      '${_fileNameFromPath(source.path)}',
+    );
+  }
+
+  Future<File> renameManagedFile(File source, String title) async {
+    if (!await source.exists()) {
+      throw FileSystemException('文件不存在', source.path);
+    }
+    if (!await isManagedFilePath(source.path)) {
+      throw FileSystemException('只能重命名工作台管理的文件', source.path);
+    }
+    final extensionIndex = source.path.lastIndexOf('.');
+    final separatorIndex = source.path.lastIndexOf(Platform.pathSeparator);
+    final extension = extensionIndex > separatorIndex
+        ? source.path.substring(extensionIndex)
+        : '';
+    var safeTitle = _safeFileName(title);
+    if (extension.isNotEmpty &&
+        safeTitle.toLowerCase().endsWith(extension.toLowerCase())) {
+      safeTitle = safeTitle.substring(0, safeTitle.length - extension.length);
+    }
+    if (safeTitle.trim().isEmpty) {
+      throw const FileSystemException('文件名不能为空');
+    }
+    final target = File(
+      '${source.parent.path}${Platform.pathSeparator}$safeTitle$extension',
+    );
+    if (_normalizePath(source.path) == _normalizePath(target.path)) {
       return source;
     }
     if (await target.exists()) {
-      if (await _hasSameFileContent(source, target)) {
-        return target;
-      }
-      final availableTarget = await _nextAvailableFile(target);
-      return source.copy(availableTarget.path);
+      throw FileSystemException('同名文件已存在', target.path);
     }
-    return source.copy(target.path);
+    return source.rename(target.path);
+  }
+
+  Future<File?> stageManagedFileDeletion(
+    File source, {
+    File? stagedFile,
+  }) async {
+    if (!await source.exists()) {
+      return null;
+    }
+    if (!await isManagedFilePath(source.path)) {
+      throw FileSystemException('只能删除工作台管理的文件', source.path);
+    }
+    final staged =
+        stagedFile ?? await resolveManagedDeletionStagingFile(source);
+    return source.rename(staged.path);
+  }
+
+  Future<void> restoreStagedManagedFile(File staged, File original) async {
+    if (await staged.exists()) {
+      await staged.rename(original.path);
+    }
+  }
+
+  Future<void> deleteManagedStagedFile(File staged) {
+    return staged.delete();
   }
 
   Future<File> copyPdfIntoMaterials(

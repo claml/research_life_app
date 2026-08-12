@@ -2,6 +2,14 @@ import 'dart:ui';
 
 import 'package:flutter/material.dart';
 
+abstract final class AppLayout {
+  static const double pageHeaderMinHeight = 138;
+  static const double pageHorizontalPadding = 28;
+  static const double pageContentTopPadding = 28;
+  static const double workspaceTabHeight = 44;
+  static const Duration quickMotion = Duration(milliseconds: 180);
+}
+
 enum AppColorTheme { green, pink, blue, ojBlue, white, black }
 
 extension AppColorThemeDetails on AppColorTheme {

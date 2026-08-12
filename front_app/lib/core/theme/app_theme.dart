@@ -83,6 +83,8 @@ class AppTheme {
       useMaterial3: true,
       colorScheme: scheme,
       scaffoldBackgroundColor: tokens.canvas,
+      focusColor: tokens.accentSoft,
+      hoverColor: tokens.panelSubtle,
       textTheme: textTheme,
       dividerColor: tokens.borderFaint,
       splashFactory: InkSparkle.splashFactory,

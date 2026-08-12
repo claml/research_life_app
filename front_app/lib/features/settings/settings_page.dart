@@ -4,20 +4,15 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
-import '../../app/app_services_scope.dart';
-import '../../app/auth_scope.dart';
 import '../../app/research_life_scope.dart';
-import '../auth/login_page.dart';
-import '../sync/cloud_migration_page.dart';
-import 'widgets/sync_status_panel.dart';
 import '../../core/models/app_models.dart';
 import '../../core/theme/app_tokens.dart';
-import '../../services/analysis/llm_provider_presets.dart';
 import '../../services/pet/pet_companion_service.dart';
 import '../../services/utility/privacy_screen.dart';
 import '../../shared/widgets/frosted_glass.dart';
 import '../../state/research_life_controller.dart';
 import '../../shared/widgets/section_card.dart';
+import 'widgets/local_backup_panel.dart';
 
 class SettingsPage extends StatefulWidget {
   const SettingsPage({super.key});
@@ -29,18 +24,7 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   late final TextEditingController _settingsSearchController;
   late final TextEditingController _calendarInputController;
-  late final TextEditingController _remoteLlmTimeoutController;
-  late final TextEditingController _remoteLlmBaseUrlController;
-  late final TextEditingController _remoteLlmModelController;
-  late final TextEditingController _remoteLlmApiKeyController;
-  late final TextEditingController _weatherApiKeyController;
-  late final TextEditingController _weatherApiHostController;
-  String? _remoteLlmProviderValue;
-  bool _remoteLlmApiKeyVisible = false;
-  bool _weatherApiKeyVisible = false;
   String? _syncedCalendarEditSessionId;
-  String? _syncedRemoteLlmSettingsSignature;
-  String? _syncedWeatherSettingsSignature;
   String _settingsQuery = '';
   _SettingsCategory _selectedCategory = _SettingsCategory.all;
   final Map<String, GlobalKey> _sectionKeys = {};
@@ -50,19 +34,10 @@ class _SettingsPageState extends State<SettingsPage> {
     super.initState();
     _settingsSearchController = TextEditingController();
     _calendarInputController = TextEditingController();
-    _remoteLlmTimeoutController = TextEditingController();
-    _remoteLlmBaseUrlController = TextEditingController();
-    _remoteLlmModelController = TextEditingController();
-    _remoteLlmApiKeyController = TextEditingController();
-    _weatherApiKeyController = TextEditingController();
-    _weatherApiHostController = TextEditingController();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final controller = ResearchLifeScope.of(context);
       unawaited(controller.ensureHomeGalleryReady());
       unawaited(controller.ensurePetCompanionLoaded());
-      unawaited(controller.ensureRemoteLlmAnalysisSettingsLoaded());
-      unawaited(controller.ensureWeatherApiLoaded());
-      unawaited(controller.refreshCloudSyncStatus());
     });
   }
 
@@ -70,12 +45,6 @@ class _SettingsPageState extends State<SettingsPage> {
   void dispose() {
     _settingsSearchController.dispose();
     _calendarInputController.dispose();
-    _remoteLlmTimeoutController.dispose();
-    _remoteLlmBaseUrlController.dispose();
-    _remoteLlmModelController.dispose();
-    _remoteLlmApiKeyController.dispose();
-    _weatherApiKeyController.dispose();
-    _weatherApiHostController.dispose();
     super.dispose();
   }
 
@@ -97,154 +66,21 @@ class _SettingsPageState extends State<SettingsPage> {
             _calendarInputController.text = editingText;
           }
         }
-        final remoteLlmSettings = controller.remoteLlmAnalysisSettings;
-        final remoteLlmSettingsSignature = _remoteLlmSettingsSignature(
-          remoteLlmSettings,
-        );
-        if (_syncedRemoteLlmSettingsSignature != remoteLlmSettingsSignature) {
-          _syncedRemoteLlmSettingsSignature = remoteLlmSettingsSignature;
-          _remoteLlmTimeoutController.text =
-              '${remoteLlmSettings.remoteTimeoutSeconds}';
-          _remoteLlmProviderValue =
-              remoteLlmSettings.provider ?? llmProviderPresets.first.id;
-          _remoteLlmBaseUrlController.text = remoteLlmSettings.baseUrl ?? '';
-          _remoteLlmModelController.text = remoteLlmSettings.modelName ?? '';
-          _remoteLlmApiKeyController.text = remoteLlmSettings.apiKey ?? '';
-        }
-        final weatherApiSignature =
-            '${controller.weatherApiKey}|${controller.weatherApiHost}';
-        if (_syncedWeatherSettingsSignature != weatherApiSignature) {
-          _syncedWeatherSettingsSignature = weatherApiSignature;
-          _weatherApiKeyController.text = controller.weatherApiKey;
-          _weatherApiHostController.text = controller.weatherApiHost;
-        }
         final calendarSubtitle = isEditingCalendar
             ? '正在编辑${controller.editingInstitutionCalendarTitle == null ? '' : ' · ${controller.editingInstitutionCalendarTitle}'}，保存后会覆盖这条历史记录。'
             : importedCount == 0
             ? '把外部识别后的校历文本贴到下方，导入后会直接标注到主页日历。'
             : '当前已导入$importedCount 条校历事件${controller.institutionCalendarTitle == null ? '' : ' · ${controller.institutionCalendarTitle}'}';
 
-        final auth = AuthScope.of(context);
-        final loggedInUser = auth.user;
-
         final sections = <_SettingsSectionSpec>[
           _SettingsSectionSpec(
-            id: 'account.profile',
+            id: 'storage.local_backup',
             category: _SettingsCategory.storage,
-            icon: Icons.account_circle_outlined,
-            title: '账号',
-            subtitle: auth.isAuthenticated
-                ? '已登录：${loggedInUser?.username ?? ''}'
-                : auth.isGuest
-                ? '当前为本地模式，可登录以启用云同步'
-                : '未登录',
-            keywords: const ['账号', '登录', '登出', '用户', 'auth', '同步', '迁移'],
-            childBuilder: (_) => Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (loggedInUser != null) ...[
-                  _InfoBanner(
-                    title: '当前账号',
-                    body:
-                        '用户 ID：${loggedInUser.id}'
-                        '${loggedInUser.email == null ? '' : '\n邮箱：${loggedInUser.email}'}',
-                  ),
-                  const SizedBox(height: 14),
-                  FilledButton.icon(
-                    onPressed: () {
-                      Navigator.of(context).push(
-                        MaterialPageRoute<void>(
-                          builder: (_) => CloudMigrationPage(
-                            syncEngine: AppServicesScope.of(
-                              context,
-                            ).fileSyncEngine,
-                          ),
-                        ),
-                      );
-                    },
-                    icon: const Icon(Icons.cloud_upload_outlined),
-                    label: const Text('迁移到云端'),
-                  ),
-                  const SizedBox(height: 12),
-                  FilledButton.icon(
-                    onPressed: auth.busy
-                        ? null
-                        : () => _runAsyncAction(context, auth.logout),
-                    icon: const Icon(Icons.logout_rounded),
-                    label: const Text('退出登录'),
-                  ),
-                ] else ...[
-                  FilledButton.icon(
-                    onPressed: auth.busy
-                        ? null
-                        : () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute<void>(
-                                builder: (_) => const LoginPage(),
-                              ),
-                            );
-                          },
-                    icon: const Icon(Icons.login_rounded),
-                    label: Text(auth.isGuest ? '登录并启用云同步' : '登录云端账号'),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          _SettingsSectionSpec(
-            id: 'sync.status',
-            category: _SettingsCategory.storage,
-            icon: Icons.sync_rounded,
-            title: '同步状态',
-            subtitle: controller.cloudSyncEnabled
-                ? _syncStatusSubtitle(controller)
-                : '本地模式下不会连接云端，登录后可启用文件与批注同步。',
-            keywords: const [
-              '同步',
-              '云端',
-              'outbox',
-              '冲突',
-              '重试',
-              '失败',
-              '状态',
-              'sync',
-            ],
-            trailingBuilder: (_) => Wrap(
-              spacing: 10,
-              runSpacing: 10,
-              children: [
-                OutlinedButton.icon(
-                  onPressed:
-                      controller.cloudSyncStatusBusy ||
-                          !controller.cloudSyncEnabled
-                      ? null
-                      : () => _runAsyncAction(
-                          context,
-                          controller.refreshCloudSyncStatus,
-                        ),
-                  icon: const Icon(Icons.refresh_rounded),
-                  label: const Text('刷新状态'),
-                ),
-                FilledButton.icon(
-                  onPressed:
-                      controller.cloudSyncBusy || !controller.cloudSyncEnabled
-                      ? null
-                      : () => _runAsyncAction(context, controller.syncCloudNow),
-                  icon: const Icon(Icons.sync_rounded),
-                  label: const Text('立即同步'),
-                ),
-              ],
-            ),
-            childBuilder: (_) => SyncStatusPanel(
-              enabled: controller.cloudSyncEnabled,
-              status: controller.cloudSyncStatus,
-              statusBusy: controller.cloudSyncStatusBusy,
-              syncBusy: controller.cloudSyncBusy,
-              statusMessage: controller.cloudSyncStatusMessage,
-              syncMessage: controller.cloudSyncMessage,
-              syncMessageIsError: controller.cloudSyncIsError,
-              cloudFilesMessage: controller.cloudFilesMessage,
-            ),
+            icon: Icons.backup_rounded,
+            title: '备份与恢复',
+            subtitle: '本地备份数据库、资料清单和工作区文件。',
+            keywords: const ['备份', '恢复', '本地', '数据', '目录'],
+            childBuilder: (_) => const LocalBackupPanel(showHeading: false),
           ),
           _SettingsSectionSpec(
             id: 'appearance.theme',
@@ -288,74 +124,6 @@ class _SettingsPageState extends State<SettingsPage> {
             childBuilder: (_) => _GlassSettingsPanel(
               settings: controller.glassSettings,
               onChanged: (settings) => controller.saveGlassSettings(settings),
-            ),
-          ),
-          _SettingsSectionSpec(
-            id: 'analysis.remote_llm',
-            category: _SettingsCategory.analysis,
-            icon: Icons.psychology_alt_rounded,
-            title: '远程 LLM 周分析',
-            subtitle: '通过后端服务器调用远程大模型生成结构化周分析。',
-            keywords: const [
-              'AI',
-              'LLM',
-              'remote',
-              'server',
-              '模型',
-              '周分析',
-              'JSON',
-              'Schema',
-              '兜底',
-            ],
-            childBuilder: (_) => _RemoteLlmAnalysisPanel(
-              settings: remoteLlmSettings,
-              timeoutController: _remoteLlmTimeoutController,
-              baseUrlController: _remoteLlmBaseUrlController,
-              modelController: _remoteLlmModelController,
-              apiKeyController: _remoteLlmApiKeyController,
-              providerValue: _remoteLlmProviderValue,
-              apiKeyVisible: _remoteLlmApiKeyVisible,
-              settingsBusy: controller.remoteLlmAnalysisSettingsBusy,
-              onProviderChanged: (value) {
-                setState(() => _remoteLlmProviderValue = value);
-                _applyProviderPresetDefaults(
-                  value,
-                  _remoteLlmBaseUrlController,
-                  _remoteLlmModelController,
-                );
-              },
-              onApiKeyVisibilityChanged: (visible) =>
-                  setState(() => _remoteLlmApiKeyVisible = visible),
-              onEnableChanged: (value) => _runAsyncAction(
-                context,
-                () => controller.saveRemoteLlmAnalysisSettings(
-                  _remoteLlmSettingsFromInputs(
-                    remoteLlmSettings,
-                  ).copyWith(enableRemoteLlmAnalysis: value),
-                ),
-              ),
-              onFallbackChanged: (value) => _runAsyncAction(
-                context,
-                () => controller.saveRemoteLlmAnalysisSettings(
-                  _remoteLlmSettingsFromInputs(
-                    remoteLlmSettings,
-                  ).copyWith(fallbackToRules: value),
-                ),
-              ),
-              onStrictJsonSchemaChanged: (value) => _runAsyncAction(
-                context,
-                () => controller.saveRemoteLlmAnalysisSettings(
-                  _remoteLlmSettingsFromInputs(
-                    remoteLlmSettings,
-                  ).copyWith(strictJsonSchema: value),
-                ),
-              ),
-              onSave: () => _runAsyncAction(
-                context,
-                () => controller.saveRemoteLlmAnalysisSettings(
-                  _remoteLlmSettingsFromInputs(remoteLlmSettings),
-                ),
-              ),
             ),
           ),
           _SettingsSectionSpec(
@@ -423,13 +191,9 @@ class _SettingsPageState extends State<SettingsPage> {
                   title: 'SQLite 数据库文件',
                   path: controller.databaseFilePath,
                   buttonLabel: '打开数据库目录',
-                  secondaryButtonLabel: '备份数据库',
-                  secondaryIcon: Icons.backup_rounded,
                   busy: controller.galleryBusy,
                   onOpen: () =>
                       _runAsyncAction(context, controller.openDatabaseFolder),
-                  onSecondary: () =>
-                      _runAsyncAction(context, controller.backupDatabase),
                 ),
                 const SizedBox(height: 14),
                 _PathRow(
@@ -518,37 +282,6 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           _SettingsSectionSpec(
-            id: 'home.weather',
-            category: _SettingsCategory.general,
-            icon: Icons.cloud_rounded,
-            title: '主页天气',
-            subtitle: '和风天气（QWeather）配置，主页天气卡片的数据来源。',
-            keywords: const [
-              '天气',
-              'weather',
-              '和风',
-              'QWeather',
-              'API Key',
-              'API Host',
-              '定位',
-              '昆山',
-            ],
-            childBuilder: (_) => _WeatherSettingsPanel(
-              apiKeyController: _weatherApiKeyController,
-              apiHostController: _weatherApiHostController,
-              apiKeyVisible: _weatherApiKeyVisible,
-              onApiKeyVisibilityChanged: (visible) =>
-                  setState(() => _weatherApiKeyVisible = visible),
-              onSave: () => _runAsyncAction(
-                context,
-                () => controller.saveWeatherApiSettings(
-                  apiKey: _weatherApiKeyController.text,
-                  apiHost: _weatherApiHostController.text,
-                ),
-              ),
-            ),
-          ),
-          _SettingsSectionSpec(
             id: 'general.closeToTray',
             category: _SettingsCategory.general,
             icon: Icons.system_update_alt_rounded,
@@ -558,7 +291,7 @@ class _SettingsPageState extends State<SettingsPage> {
             childBuilder: (_) => Padding(
               padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
               child: Text(
-                '关闭窗口后程序继续在系统托盘运行，云同步与日历提醒照常工作；'
+                '关闭窗口后程序继续在系统托盘运行，日历提醒与本地任务照常工作；'
                 '单击托盘图标唤回窗口，右键托盘图标可选择「退出」彻底结束程序。',
                 style: TextStyle(
                   color: context.tokens.textSecondary,
@@ -898,7 +631,9 @@ class _SettingsPageState extends State<SettingsPage> {
     BuildContext context, {
     required bool enable,
   }) async {
-    final message = enable ? enterPrivacyScreen() : setPrivacyScreen(enable: false);
+    final message = enable
+        ? enterPrivacyScreen()
+        : setPrivacyScreen(enable: false);
     if (!context.mounted) {
       return;
     }
@@ -930,80 +665,6 @@ class _SettingsPageState extends State<SettingsPage> {
       ).showSnackBar(SnackBar(content: Text('导入失败：$error')));
     }
   }
-
-  RemoteLlmAnalysisSettings _remoteLlmSettingsFromInputs(
-    RemoteLlmAnalysisSettings current,
-  ) {
-    final provider = _remoteLlmProviderValue;
-    final baseUrl = _remoteLlmBaseUrlController.text.trim();
-    final modelName = _remoteLlmModelController.text.trim();
-    final apiKey = _remoteLlmApiKeyController.text.trim();
-    return current.copyWith(
-      remoteTimeoutSeconds:
-          int.tryParse(_remoteLlmTimeoutController.text) ??
-          RemoteLlmAnalysisSettings.defaultRemoteTimeoutSeconds,
-      provider: provider,
-      baseUrl: baseUrl.isEmpty ? null : baseUrl,
-      modelName: modelName.isEmpty ? null : modelName,
-      apiKey: apiKey.isEmpty ? null : apiKey,
-    );
-  }
-
-  void _applyProviderPresetDefaults(
-    String providerId,
-    TextEditingController baseUrlController,
-    TextEditingController modelController,
-  ) {
-    final preset = llmPresetById(providerId);
-    if (preset == null) {
-      baseUrlController.text = '';
-      modelController.text = '';
-      return;
-    }
-    if (baseUrlController.text.trim().isEmpty) {
-      baseUrlController.text = preset.defaultBaseUrl;
-    }
-    if (modelController.text.trim().isEmpty) {
-      modelController.text = preset.defaultModel;
-    }
-  }
-
-  String _remoteLlmSettingsSignature(RemoteLlmAnalysisSettings settings) {
-    return [
-      settings.enableRemoteLlmAnalysis,
-      settings.remoteTimeoutSeconds,
-      settings.fallbackToRules,
-      settings.strictJsonSchema,
-      settings.provider,
-      settings.baseUrl,
-      settings.modelName,
-      settings.apiKey,
-    ].join('|');
-  }
-
-  String _syncStatusSubtitle(ResearchLifeController controller) {
-    if (controller.cloudSyncBusy) {
-      return '正在同步云端文件、元数据与批注。';
-    }
-    if (controller.cloudSyncStatusBusy) {
-      return '正在读取本地同步队列。';
-    }
-    final status = controller.cloudSyncStatus;
-    if (status.totalPendingCount == 0 && !status.hasRetryingItems) {
-      final lastSyncedAt = status.lastSyncedAt;
-      return lastSyncedAt == null
-          ? '还没有云同步记录，点击立即同步开始。'
-          : '上次同步 ${_formatDateTime(lastSyncedAt)}，当前没有待处理项。';
-    }
-    return '待处理${status.totalPendingCount} 项，其中 ${status.retryingOutboxCount} 项正在重试。';
-  }
-}
-
-String _formatDateTime(DateTime value) {
-  final local = value.toLocal();
-  String twoDigits(int number) => number.toString().padLeft(2, '0');
-  return '${local.year}-${twoDigits(local.month)}-${twoDigits(local.day)} '
-      '${twoDigits(local.hour)}:${twoDigits(local.minute)}';
 }
 
 enum _SettingsCategory {
@@ -1715,170 +1376,6 @@ class _ThemePreviewPanel extends StatelessWidget {
   }
 }
 
-class _RemoteLlmAnalysisPanel extends StatelessWidget {
-  const _RemoteLlmAnalysisPanel({
-    required this.settings,
-    required this.timeoutController,
-    required this.baseUrlController,
-    required this.modelController,
-    required this.apiKeyController,
-    required this.providerValue,
-    required this.apiKeyVisible,
-    required this.settingsBusy,
-    required this.onProviderChanged,
-    required this.onApiKeyVisibilityChanged,
-    required this.onEnableChanged,
-    required this.onFallbackChanged,
-    required this.onStrictJsonSchemaChanged,
-    required this.onSave,
-  });
-
-  final RemoteLlmAnalysisSettings settings;
-  final TextEditingController timeoutController;
-  final TextEditingController baseUrlController;
-  final TextEditingController modelController;
-  final TextEditingController apiKeyController;
-  final String? providerValue;
-  final bool apiKeyVisible;
-  final bool settingsBusy;
-  final ValueChanged<String> onProviderChanged;
-  final ValueChanged<bool> onApiKeyVisibilityChanged;
-  final ValueChanged<bool> onEnableChanged;
-  final ValueChanged<bool> onFallbackChanged;
-  final ValueChanged<bool> onStrictJsonSchemaChanged;
-  final VoidCallback onSave;
-
-  @override
-  Widget build(BuildContext context) {
-    final busy = settingsBusy;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        _SettingsToggleRow(
-          icon: Icons.psychology_alt_rounded,
-          title: '启用远程 LLM 周分析',
-          subtitle: '开启后周分析会通过后端服务器调用远程大模型。',
-          value: settings.enableRemoteLlmAnalysis,
-          enabled: !busy,
-          onChanged: onEnableChanged,
-        ),
-        const SizedBox(height: 14),
-        DropdownButtonFormField<String>(
-          initialValue: providerValue ?? llmProviderPresets.first.id,
-          decoration: const InputDecoration(
-            labelText: '服务商',
-            border: OutlineInputBorder(),
-          ),
-          items: [
-            for (final preset in llmProviderPresets)
-              DropdownMenuItem(value: preset.id, child: Text(preset.label)),
-            const DropdownMenuItem(
-              value: llmCustomProviderId,
-              child: Text('自定义（填 Base URL）'),
-            ),
-          ],
-          onChanged: busy
-              ? null
-              : (value) {
-                  if (value != null) {
-                    onProviderChanged(value);
-                  }
-                },
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: baseUrlController,
-          enabled: !busy,
-          decoration: const InputDecoration(
-            labelText: 'Base URL',
-            hintText: 'OpenAI 兼容接口地址，例如 https://api.deepseek.com',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: modelController,
-          enabled: !busy,
-          decoration: const InputDecoration(
-            labelText: '模型名',
-            hintText: '例如 deepseek-v4-flash、gpt-4o-mini',
-            border: OutlineInputBorder(),
-          ),
-        ),
-        const SizedBox(height: 12),
-        TextField(
-          controller: apiKeyController,
-          enabled: !busy,
-          obscureText: !apiKeyVisible,
-          decoration: InputDecoration(
-            labelText: 'API Key',
-            hintText: 'sk-...',
-            border: const OutlineInputBorder(),
-            suffixIcon: IconButton(
-              icon: Icon(
-                apiKeyVisible
-                    ? Icons.visibility_off_rounded
-                    : Icons.visibility_rounded,
-              ),
-              onPressed: busy
-                  ? null
-                  : () => onApiKeyVisibilityChanged(!apiKeyVisible),
-            ),
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'API Key 仅保存在本机偏好中，周分析时随请求发送到后端临时调用，后端不会保存。',
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-            color: Theme.of(context).colorScheme.outline,
-          ),
-        ),
-        const SizedBox(height: 14),
-        SizedBox(
-          width: 180,
-          child: TextField(
-            controller: timeoutController,
-            enabled: !busy,
-            keyboardType: TextInputType.number,
-            inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-            decoration: const InputDecoration(
-              labelText: '超时时间（秒）',
-              hintText:
-                  '${RemoteLlmAnalysisSettings.defaultRemoteTimeoutSeconds}',
-              border: OutlineInputBorder(),
-            ),
-          ),
-        ),
-        const SizedBox(height: 14),
-        _SettingsToggleRow(
-          icon: Icons.safety_check_rounded,
-          title: '失败时使用规则兜底',
-          subtitle: '服务器模型不可用或输出无效时保留现有规则分析。',
-          value: settings.fallbackToRules,
-          enabled: !busy,
-          onChanged: onFallbackChanged,
-        ),
-        const SizedBox(height: 10),
-        _SettingsToggleRow(
-          icon: Icons.data_object_rounded,
-          title: '严格 JSON Schema',
-          subtitle: '请求远程模型按结构化 JSON schema 输出。',
-          value: settings.strictJsonSchema,
-          enabled: !busy,
-          onChanged: onStrictJsonSchemaChanged,
-        ),
-        const SizedBox(height: 14),
-        OutlinedButton.icon(
-          onPressed: busy ? null : onSave,
-          icon: const Icon(Icons.save_rounded),
-          label: const Text('保存设置'),
-        ),
-      ],
-    );
-  }
-}
-
 class _WeatherSettingsPanel extends StatelessWidget {
   const _WeatherSettingsPanel({
     required this.apiKeyController,
@@ -2431,19 +1928,13 @@ class _PathRow extends StatelessWidget {
     required this.buttonLabel,
     required this.busy,
     required this.onOpen,
-    this.secondaryButtonLabel,
-    this.secondaryIcon,
-    this.onSecondary,
   });
 
   final String title;
   final String? path;
   final String buttonLabel;
-  final String? secondaryButtonLabel;
-  final IconData? secondaryIcon;
   final bool busy;
   final VoidCallback onOpen;
-  final VoidCallback? onSecondary;
 
   @override
   Widget build(BuildContext context) {
@@ -2459,12 +1950,6 @@ class _PathRow extends StatelessWidget {
       runSpacing: 10,
       alignment: WrapAlignment.end,
       children: [
-        if (secondaryButtonLabel != null && onSecondary != null)
-          OutlinedButton.icon(
-            onPressed: busy ? null : onSecondary,
-            icon: Icon(secondaryIcon ?? Icons.copy_rounded),
-            label: Text(secondaryButtonLabel!),
-          ),
         FilledButton.tonalIcon(
           onPressed: busy ? null : onOpen,
           icon: const Icon(Icons.folder_open_rounded),

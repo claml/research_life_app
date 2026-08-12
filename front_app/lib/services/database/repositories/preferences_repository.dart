@@ -1,7 +1,21 @@
 import '../app_database.dart';
+import '../../storage/local_data_operation_coordinator.dart';
 
-class PreferencesRepository {
-  const PreferencesRepository(this._database);
+abstract interface class LocalMigrationPreferences {
+  Future<bool> loadLocalMigrationBackupComplete();
+
+  Future<String?> loadLocalMigrationBackupPath();
+
+  Future<void> saveLocalMigrationBackupRecord(String path);
+
+  Future<void> invalidateLocalMigrationBackupRecord();
+}
+
+class PreferencesRepository implements LocalMigrationPreferences {
+  const PreferencesRepository(
+    this._database, {
+    LocalDataOperationCoordinator? operationCoordinator,
+  }) : _operationCoordinator = operationCoordinator;
 
   static const weeklyPromptTemplateKey = 'weeklyPromptTemplate';
   static const colorThemeKey = 'colorTheme';
@@ -18,8 +32,20 @@ class PreferencesRepository {
   static const glassSettingsKey = 'glassSettings';
   static const calendarReminderEnabledKey = 'calendarReminderEnabled';
   static const pinLockKey = 'pinLock';
+  static const localMigrationBackupCompleteKey =
+      'local_mode.migration_backup_v1.complete';
+  static const localMigrationBackupPathKey =
+      'local_mode.migration_backup_v1.path';
 
   final AppDatabase _database;
+  final LocalDataOperationCoordinator? _operationCoordinator;
+
+  Future<T> _write<T>(Future<T> Function() operation) {
+    final coordinator = _operationCoordinator;
+    return coordinator == null
+        ? operation()
+        : coordinator.runExclusive(operation);
+  }
 
   Future<String?> loadString(String key) async {
     final row = await (_database.select(
@@ -29,18 +55,22 @@ class PreferencesRepository {
   }
 
   Future<void> saveString(String key, String value) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await _database
-        .into(_database.preferences)
-        .insertOnConflictUpdate(
-          PreferencesCompanion.insert(key: key, value: value, updatedAt: now),
-        );
+    await _write(() async {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      await _database
+          .into(_database.preferences)
+          .insertOnConflictUpdate(
+            PreferencesCompanion.insert(key: key, value: value, updatedAt: now),
+          );
+    });
   }
 
   Future<void> deleteString(String key) async {
-    await (_database.delete(
-      _database.preferences,
-    )..where((preference) => preference.key.equals(key))).go();
+    await _write(() async {
+      await (_database.delete(
+        _database.preferences,
+      )..where((preference) => preference.key.equals(key))).go();
+    });
   }
 
   Future<String?> loadWeeklyPromptTemplate() {
@@ -161,5 +191,35 @@ class PreferencesRepository {
 
   Future<void> deletePinLock() {
     return deleteString(pinLockKey);
+  }
+
+  @override
+  Future<bool> loadLocalMigrationBackupComplete() async {
+    return await loadString(localMigrationBackupCompleteKey) == 'true';
+  }
+
+  @override
+  Future<String?> loadLocalMigrationBackupPath() {
+    return loadString(localMigrationBackupPathKey);
+  }
+
+  @override
+  Future<void> saveLocalMigrationBackupRecord(String path) {
+    return _write(() async {
+      await _database.transaction(() async {
+        await saveString(localMigrationBackupPathKey, path);
+        await saveString(localMigrationBackupCompleteKey, 'true');
+      });
+    });
+  }
+
+  @override
+  Future<void> invalidateLocalMigrationBackupRecord() {
+    return _write(() async {
+      // Delete the completion marker first. If clearing the stale path fails,
+      // the durable state remains safely incomplete and can be retried.
+      await deleteString(localMigrationBackupCompleteKey);
+      await deleteString(localMigrationBackupPathKey);
+    });
   }
 }

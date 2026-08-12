@@ -29,6 +29,8 @@ import '../services/pet/pet_companion_service.dart';
 import '../services/review/review_service.dart';
 import '../core/network/api_exception.dart';
 import '../services/storage/backup_service.dart';
+import '../services/storage/local_data_operation_coordinator.dart';
+import '../services/storage/local_folder_service.dart';
 import '../services/storage/local_workspace_service.dart';
 import '../core/network/api_client.dart';
 import '../core/utils/workspace_file_kind.dart';
@@ -110,10 +112,12 @@ class ResearchLifeController extends ChangeNotifier {
     NotesRepository? notesRepository,
     CampusPlacesRepository? campusPlacesRepository,
     PdfDocumentsRepository? pdfDocumentsRepository,
+    LocalFolderService? localFolderService,
     FileSyncEngine? fileSyncEngine,
     CloudFileService? cloudFileService,
     bool Function()? isCloudSyncEnabled,
     AnalysisEngineCoordinator? analysisEngineCoordinator,
+    LocalDataOperationCoordinator? localDataOperationCoordinator,
   }) : _reviewService = reviewService,
        _institutionCalendarService = institutionCalendarService,
        _localWorkspaceService = localWorkspaceService,
@@ -128,14 +132,15 @@ class ResearchLifeController extends ChangeNotifier {
        _notesRepository = notesRepository,
        _campusPlacesRepository = campusPlacesRepository,
        _pdfDocumentsRepository = pdfDocumentsRepository,
+       _localFolderService = localFolderService,
        _fileSyncEngine = fileSyncEngine,
        _cloudFileServiceOverride = cloudFileService,
        _isCloudSyncEnabled = isCloudSyncEnabled,
        _analysisEngineCoordinator =
            analysisEngineCoordinator ??
-           AnalysisEngineCoordinator(
-             ruleBasedAnalysisService: analysisService,
-           ) {
+           AnalysisEngineCoordinator(ruleBasedAnalysisService: analysisService),
+       _localDataOperationCoordinator =
+           localDataOperationCoordinator ?? LocalDataOperationCoordinator() {
     _analysisCommitService = AnalysisCommitService(
       reviewService: reviewService,
       sessionsRepository: sessionsRepository,
@@ -202,6 +207,7 @@ class ResearchLifeController extends ChangeNotifier {
   final InstitutionCalendarService _institutionCalendarService;
   final AnalysisEngineCoordinator _analysisEngineCoordinator;
   final LocalWorkspaceService _localWorkspaceService;
+  final LocalDataOperationCoordinator _localDataOperationCoordinator;
   final WeatherService _weatherService;
   final PetCompanionService _petCompanionService;
   final PreferencesRepository? _preferencesRepository;
@@ -211,6 +217,7 @@ class ResearchLifeController extends ChangeNotifier {
   final NotesRepository? _notesRepository;
   final CampusPlacesRepository? _campusPlacesRepository;
   final PdfDocumentsRepository? _pdfDocumentsRepository;
+  final LocalFolderService? _localFolderService;
   final FileSyncEngine? _fileSyncEngine;
   final CloudFileService? _cloudFileServiceOverride;
   final bool Function()? _isCloudSyncEnabled;
@@ -381,6 +388,9 @@ class ResearchLifeController extends ChangeNotifier {
   bool get hasPendingPdfToolsOpen => _pendingPdfToolsNavigation;
 
   bool get hasPendingPdfToolsSelection => _pendingPdfToolsOpen != null;
+
+  /// Compatibility for the pre-existing shell; Agent settings are page-local.
+  bool consumeAiSettingsNavigationRequest() => false;
 
   void requestOpenPdfTools({String? documentId, int? cloudServerId}) {
     if (documentId != null) {
@@ -1141,6 +1151,11 @@ class ResearchLifeController extends ChangeNotifier {
     await waitForPendingPdfPersistence();
   }
 
+  Future<void> flushLocalPersistence() async {
+    await waitForPendingManualEventPersistence();
+    await waitForPendingPersistence();
+  }
+
   Future<void> ensureCampusPlacesLoaded() async {
     final repository = _campusPlacesRepository;
     if (repository == null || _campusPlacesLoaded || _campusPlacesBusy) {
@@ -1204,6 +1219,18 @@ class ResearchLifeController extends ChangeNotifier {
 
   Future<void> reloadPdfLibrary() => ensurePdfLibraryLoaded(force: true);
 
+  Future<String> renameLocalFolder(String folderPath, String newName) async {
+    final service = _localFolderService;
+    if (service == null) {
+      return '当前无法重命名文件夹。';
+    }
+    await waitForPendingPdfPersistence();
+    await ensurePdfLibraryLoaded();
+    await service.renameFolder(folder: Directory(folderPath), newName: newName);
+    await reloadPdfLibrary();
+    return '已重命名文件夹。';
+  }
+
   void clearCloudFileCache() {
     _cloudFileEntries = const [];
     _cloudFilesMessage = null;
@@ -1254,9 +1281,7 @@ class ResearchLifeController extends ChangeNotifier {
     return request;
   }
 
-  PdfOperationApi get pdfOperationApi => PdfOperationApi(
-    client: ApiClient(accessTokenReader: () => AuthController.accessToken),
-  );
+  PdfOperationApi get pdfOperationApi => PdfOperationApi(client: ApiClient());
 
   Future<void> refreshCloudUserNotes() async {
     final syncEngine = _fileSyncEngine;
@@ -1944,19 +1969,82 @@ class ResearchLifeController extends ChangeNotifier {
     return null;
   }
 
-  String? renameLocalPdfDocument(String id, String title) {
+  Future<String?> renameLocalPdfDocument(String id, String title) {
+    return _runTrackedPdfOperation(() => _renameLocalPdfDocument(id, title));
+  }
+
+  Future<String?> _renameLocalPdfDocument(String id, String title) async {
     final trimmed = title.trim();
     if (trimmed.isEmpty) {
       return '名称不能为空';
     }
-    if (_pdfDocuments.indexWhere((document) => document.id == id) == -1) {
+    final index = _pdfDocuments.indexWhere((document) => document.id == id);
+    if (index == -1) {
       return '未找到该文件';
     }
-    _updatePdfDocument(
-      id,
-      (document) =>
-          document.copyWith(title: trimmed, updatedAt: DateTime.now()),
+    final cached = _pdfDocuments[index];
+    final original = await _pdfDocumentsRepository?.findById(id) ?? cached;
+    if (original.isDeleted) {
+      _pdfDocuments.removeAt(index);
+      notifyListeners();
+      return null;
+    }
+    final originalFile = File(original.path);
+    final renameTarget = await _localWorkspaceService
+        .resolveManagedRenameTarget(originalFile, trimmed);
+    final changesPath =
+        _normalizeFilePath(renameTarget.path) !=
+        _normalizeFilePath(originalFile.path);
+    if (changesPath) {
+      await _localWorkspaceService.writeManagedFileOperationJournal(
+        type: 'rename',
+        documentId: id,
+        original: originalFile,
+        target: renameTarget,
+      );
+    }
+    final renamedFile = await _localWorkspaceService.renameManagedFile(
+      originalFile,
+      trimmed,
     );
+    final updated = original.copyWith(
+      title: _fileTitleFromPath(renamedFile.path),
+      path: renamedFile.path,
+      updatedAt: DateTime.now(),
+    );
+    try {
+      await _pdfDocumentsRepository?.saveDocument(updated, operation: 'rename');
+    } catch (_) {
+      var restored = !changesPath;
+      if (await renamedFile.exists() &&
+          _normalizeFilePath(renamedFile.path) !=
+              _normalizeFilePath(originalFile.path)) {
+        await renamedFile.rename(originalFile.path);
+        restored = true;
+      }
+      if (restored && changesPath) {
+        await _localWorkspaceService.clearManagedFileOperationJournal();
+      }
+      try {
+        await _pdfDocumentsRepository?.saveDocument(
+          original,
+          operation: 'rename',
+        );
+      } catch (_) {
+        // Preserve the original persistence error for the caller.
+      }
+      rethrow;
+    }
+    _pdfDocuments[index] = updated;
+    notifyListeners();
+    if (changesPath) {
+      try {
+        await _localWorkspaceService.clearManagedFileOperationJournal();
+      } catch (_) {
+        // The manifest and payload rename are committed. Retain the journal
+        // so startup recovery can verify the target and finish cleanup.
+      }
+    }
     return null;
   }
 
@@ -2024,6 +2112,15 @@ class ResearchLifeController extends ChangeNotifier {
   Future<PdfLibraryDocument> addWorkspaceFileFromPath(
     String path, {
     String category = _defaultPdfCategory,
+  }) {
+    return _runTrackedPdfOperation(
+      () => _addWorkspaceFileFromPath(path, category: category),
+    );
+  }
+
+  Future<PdfLibraryDocument> _addWorkspaceFileFromPath(
+    String path, {
+    required String category,
   }) async {
     final file = File(path);
     if (!await file.exists()) {
@@ -2033,10 +2130,9 @@ class ResearchLifeController extends ChangeNotifier {
 
     await ensurePdfLibraryLoaded();
     final now = DateTime.now();
-    final archivedFile = await _localWorkspaceService.copyFileIntoMaterials(
-      file,
-      category: category,
-    );
+    final archived = await _localWorkspaceService
+        .copyFileIntoMaterialsWithResult(file, category: category);
+    final archivedFile = archived.file;
     final normalizedCategory = category.trim().isEmpty
         ? _defaultPdfCategory
         : category.trim();
@@ -2056,10 +2152,17 @@ class ResearchLifeController extends ChangeNotifier {
             ? true
             : _pdfDocuments[existingIndex].inReadingList,
       );
+      try {
+        await _pdfDocumentsRepository?.saveDocument(updatedDocument);
+      } catch (_) {
+        if (archived.created && await archivedFile.exists()) {
+          await archivedFile.delete();
+        }
+        rethrow;
+      }
       _pdfDocuments
         ..removeAt(existingIndex)
         ..insert(0, updatedDocument);
-      _queuePdfDocumentSave(updatedDocument);
       notifyListeners();
       return updatedDocument;
     }
@@ -2075,9 +2178,16 @@ class ResearchLifeController extends ChangeNotifier {
       updatedAt: now,
       inReadingList: kind.isPdf,
     );
+    try {
+      await _pdfDocumentsRepository?.saveDocument(document);
+    } catch (_) {
+      if (archived.created && await archivedFile.exists()) {
+        await archivedFile.delete();
+      }
+      rethrow;
+    }
     _pdfDocuments.insert(0, document);
     _pdfAnnotationsByDocumentId[document.id] = const [];
-    _queuePdfDocumentSave(document);
     notifyListeners();
     return document;
   }
@@ -2099,6 +2209,12 @@ class ResearchLifeController extends ChangeNotifier {
     }
 
     final document = _pdfDocuments[index];
+    if (document.isDeleted) {
+      _pdfDocuments.removeAt(index);
+      _pdfAnnotationsByDocumentId.remove(id);
+      notifyListeners();
+      return '已删除。';
+    }
     if (!document.inReadingList) {
       return '《${document.title}》已不在阅读列表中。';
     }
@@ -2131,16 +2247,87 @@ class ResearchLifeController extends ChangeNotifier {
     notifyListeners();
   }
 
-  String deletePdfDocument(String id) {
+  Future<String> deletePdfDocument(String id) {
+    return _runTrackedPdfOperation(() => _deletePdfDocument(id));
+  }
+
+  Future<String> _deletePdfDocument(String id) async {
     final index = _pdfDocuments.indexWhere((document) => document.id == id);
     if (index == -1) {
       return '没有找到这份 PDF。';
     }
 
-    final document = _pdfDocuments.removeAt(index);
+    final cached = _pdfDocuments[index];
+    final document = await _pdfDocumentsRepository?.findById(id) ?? cached;
+    if (document.isDeleted) {
+      _pdfDocuments.removeAt(index);
+      _pdfAnnotationsByDocumentId.remove(id);
+      notifyListeners();
+      return '已删除。';
+    }
+    final originalFile = File(document.path);
+    final stagedTarget = await originalFile.exists()
+        ? await _localWorkspaceService.resolveManagedDeletionStagingFile(
+            originalFile,
+          )
+        : null;
+    if (stagedTarget != null) {
+      await _localWorkspaceService.writeManagedFileOperationJournal(
+        type: 'delete',
+        documentId: id,
+        original: originalFile,
+        target: stagedTarget,
+      );
+    }
+    final stagedFile = await _localWorkspaceService.stageManagedFileDeletion(
+      originalFile,
+      stagedFile: stagedTarget,
+    );
+    try {
+      await _pdfDocumentsRepository?.deleteDocument(id);
+    } catch (_) {
+      if (stagedFile != null) {
+        await _localWorkspaceService.restoreStagedManagedFile(
+          stagedFile,
+          originalFile,
+        );
+        await _localWorkspaceService.clearManagedFileOperationJournal();
+      }
+      rethrow;
+    }
+    try {
+      if (stagedFile != null && await stagedFile.exists()) {
+        await _localWorkspaceService.deleteManagedStagedFile(stagedFile);
+      }
+    } catch (_) {
+      try {
+        await _pdfDocumentsRepository?.saveDocument(document);
+        if (stagedFile != null) {
+          await _localWorkspaceService.restoreStagedManagedFile(
+            stagedFile,
+            originalFile,
+          );
+          await _localWorkspaceService.clearManagedFileOperationJournal();
+        }
+      } catch (error, stackTrace) {
+        _pdfDocuments.removeAt(index);
+        _pdfAnnotationsByDocumentId.remove(id);
+        notifyListeners();
+        Error.throwWithStackTrace(error, stackTrace);
+      }
+      rethrow;
+    }
+    _pdfDocuments.removeAt(index);
     _pdfAnnotationsByDocumentId.remove(id);
-    _queuePdfDocumentDelete(id);
     notifyListeners();
+    if (stagedFile != null) {
+      try {
+        await _localWorkspaceService.clearManagedFileOperationJournal();
+      } catch (_) {
+        // The tombstone and payload deletion are committed. Retain the
+        // journal for idempotent cleanup on the next startup.
+      }
+    }
     return '已删除《${document.title}》。';
   }
 
@@ -2511,6 +2698,28 @@ class ResearchLifeController extends ChangeNotifier {
     _queueManualEventPersistence(event);
     notifyListeners();
     return '已添加记录。';
+  }
+
+  Future<String> deleteManualEvent(String eventId) async {
+    await waitForPendingManualEventPersistence();
+    await waitForPendingTodoStatusPersistence();
+    await ensureManualEventsLoaded();
+    await ensureTodoStatusLoaded();
+
+    final eventIndex = _manualEvents.indexWhere((event) => event.id == eventId);
+    if (eventIndex == -1 || !_manualEvents[eventIndex].isEditable) {
+      return '该记录不允许删除。';
+    }
+
+    final repository = _manualEventsRepository;
+    if (repository != null) {
+      await repository.deleteManualEvent(eventId);
+    }
+
+    _manualEvents = [..._manualEvents]..removeAt(eventIndex);
+    _todoStatus = {..._todoStatus}..remove(eventId);
+    notifyListeners();
+    return '已删除记录。';
   }
 
   /// 切换待办完成状态；完成时记录完成时间，撤销时清空。
@@ -3048,7 +3257,7 @@ class ResearchLifeController extends ChangeNotifier {
 
     _setRemoteLlmAnalysisSettingsBusy(true);
     try {
-      _remoteLlmAnalysisSettings = await _loadStoredRemoteLlmAnalysisSettings();
+      _remoteLlmAnalysisSettings = const RemoteLlmAnalysisSettings();
       _remoteLlmAnalysisSettingsLoaded = true;
       notifyListeners();
     } finally {
@@ -3062,21 +3271,18 @@ class ResearchLifeController extends ChangeNotifier {
   }
 
   Future<String> saveRemoteLlmAnalysisSettings(
-    RemoteLlmAnalysisSettings settings,
+    RemoteLlmAnalysisSettings _,
   ) async {
-    final normalizedSettings = settings.copyWith();
     _setRemoteLlmAnalysisSettingsBusy(true);
     try {
-      _remoteLlmAnalysisSettings = normalizedSettings;
+      _remoteLlmAnalysisSettings = const RemoteLlmAnalysisSettings();
       _remoteLlmAnalysisSettingsLoaded = true;
-      await _saveStoredRemoteLlmAnalysisSettings(normalizedSettings);
       notifyListeners();
-      return '远程 LLM 周分析设置已保存。';
+      return '远程模型凭据将在接入 Windows 安全凭据后开放。';
     } finally {
       _setRemoteLlmAnalysisSettingsBusy(false);
     }
   }
-
 
   Future<void> ensurePetCompanionLoaded({bool autoStart = false}) async {
     if (_petCompanionLoaded) {
@@ -3529,6 +3735,7 @@ class ResearchLifeController extends ChangeNotifier {
     );
   }
 
+  /*
   Future<RemoteLlmAnalysisSettings>
   _loadStoredRemoteLlmAnalysisSettings() async {
     final rawSettings = await _preferencesRepository
@@ -3550,6 +3757,7 @@ class ResearchLifeController extends ChangeNotifier {
     return const RemoteLlmAnalysisSettings();
   }
 
+  // ignore: unused_element
   Future<void> _saveStoredRemoteLlmAnalysisSettings(
     RemoteLlmAnalysisSettings settings,
   ) async {
@@ -3558,6 +3766,7 @@ class ResearchLifeController extends ChangeNotifier {
     );
   }
 
+  */
 
   Future<WeatherLocation?> _loadStoredWeatherLocation() async {
     final rawLocation = await _preferencesRepository?.loadWeatherLocation();
@@ -4045,7 +4254,6 @@ class ResearchLifeController extends ChangeNotifier {
     _remoteLlmAnalysisSettingsBusy = value;
     notifyListeners();
   }
-
 
   void _setPdfLibraryBusy(bool value) {
     if (_pdfLibraryBusy == value) {
@@ -4965,11 +5173,22 @@ class ResearchLifeController extends ChangeNotifier {
 
     _pdfPersistenceError = null;
     _pendingPdfPersistence = _pendingPdfPersistence
-        .then((_) => repository.saveDocument(document))
+        .then((_) => repository.saveDocument(document, operation: 'metadata'))
         .catchError((Object error) {
           _pdfPersistenceError = error;
         });
     unawaited(_pendingPdfPersistence);
+  }
+
+  Future<T> _runTrackedPdfOperation<T>(Future<T> Function() operation) {
+    _pdfPersistenceError = null;
+    final result = _localDataOperationCoordinator.runExclusive(operation);
+    final previous = _pendingPdfPersistence;
+    final tracked = result.then<void>((_) {}).catchError((Object error) {
+      _pdfPersistenceError = error;
+    });
+    _pendingPdfPersistence = Future.wait<void>([previous, tracked]);
+    return result;
   }
 
   void _queuePdfDocumentDelete(String documentId) {

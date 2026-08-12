@@ -1,6 +1,7 @@
 class BackupManifest {
   const BackupManifest({
     this.manifestVersion = currentManifestVersion,
+    this.purpose = BackupPurpose.manual,
     required this.appVersion,
     required this.createdAt,
     required this.schemaVersion,
@@ -14,6 +15,7 @@ class BackupManifest {
   static const currentManifestVersion = 1;
 
   final int manifestVersion;
+  final BackupPurpose purpose;
   final String appVersion;
   final DateTime createdAt;
   final int schemaVersion;
@@ -36,14 +38,74 @@ class BackupManifest {
       throw const FormatException('backup_manifest.json 缺少 preferencesFile。');
     }
 
+    final manifestVersion = _intValue(json['manifestVersion']);
+    final appVersion = _stringValue(json['appVersion']);
+    final createdAtText = _stringValue(json['createdAt']);
+    final createdAt = createdAtText == null
+        ? null
+        : DateTime.tryParse(createdAtText);
+    final schemaVersion = _intValue(json['schemaVersion']);
+    final workspacePath = _stringValue(json['workspacePath']);
+    if (manifestVersion == null || manifestVersion < 1) {
+      throw const FormatException(
+        'backup_manifest.json has invalid manifestVersion.',
+      );
+    }
+    if (appVersion == null || appVersion.trim().isEmpty) {
+      throw const FormatException(
+        'backup_manifest.json has invalid appVersion.',
+      );
+    }
+    if (createdAt == null) {
+      throw const FormatException(
+        'backup_manifest.json has invalid createdAt.',
+      );
+    }
+    if (schemaVersion == null || schemaVersion < 1) {
+      throw const FormatException(
+        'backup_manifest.json has invalid schemaVersion.',
+      );
+    }
+    if (workspacePath == null || workspacePath.trim().isEmpty) {
+      throw const FormatException(
+        'backup_manifest.json has invalid workspacePath.',
+      );
+    }
+    if (json.containsKey('workspaceManifestFile') &&
+        workspaceManifestFile is! Map) {
+      throw const FormatException(
+        'backup_manifest.json has invalid workspaceManifestFile.',
+      );
+    }
+    List<BackupFileInfo>? parsedLocalFileLibraryFiles;
+    if (json.containsKey('localFileLibraryFiles')) {
+      if (localFileLibraryFiles is! List) {
+        throw const FormatException(
+          'backup_manifest.json has invalid localFileLibraryFiles.',
+        );
+      }
+      parsedLocalFileLibraryFiles = <BackupFileInfo>[];
+      for (final item in localFileLibraryFiles) {
+        if (item is! Map) {
+          throw const FormatException(
+            'backup_manifest.json has invalid localFileLibraryFiles item.',
+          );
+        }
+        parsedLocalFileLibraryFiles.add(
+          BackupFileInfo.fromJson(item.cast<String, Object?>()),
+        );
+      }
+    }
+
     return BackupManifest(
-      manifestVersion: _intValue(json['manifestVersion']) ?? 0,
-      appVersion: _stringValue(json['appVersion']) ?? '',
-      createdAt:
-          DateTime.tryParse(_stringValue(json['createdAt']) ?? '') ??
-          DateTime.fromMillisecondsSinceEpoch(0),
-      schemaVersion: _intValue(json['schemaVersion']) ?? 0,
-      workspacePath: _stringValue(json['workspacePath']) ?? '',
+      manifestVersion: manifestVersion,
+      purpose: json.containsKey('purpose')
+          ? _backupPurposeValue(json['purpose'])
+          : BackupPurpose.manual,
+      appVersion: appVersion,
+      createdAt: createdAt,
+      schemaVersion: schemaVersion,
+      workspacePath: workspacePath,
       databaseFile: BackupFileInfo.fromJson(
         databaseFile.cast<String, Object?>(),
       ),
@@ -55,21 +117,14 @@ class BackupManifest {
               workspaceManifestFile.cast<String, Object?>(),
             )
           : null,
-      localFileLibraryFiles: localFileLibraryFiles is List
-          ? localFileLibraryFiles
-                .whereType<Map>()
-                .map(
-                  (item) =>
-                      BackupFileInfo.fromJson(item.cast<String, Object?>()),
-                )
-                .toList()
-          : null,
+      localFileLibraryFiles: parsedLocalFileLibraryFiles,
     );
   }
 
   Map<String, Object?> toJson() {
     return {
       'manifestVersion': manifestVersion,
+      'purpose': purpose.name,
       'appVersion': appVersion,
       'createdAt': createdAt.toIso8601String(),
       'schemaVersion': schemaVersion,
@@ -85,6 +140,8 @@ class BackupManifest {
     };
   }
 }
+
+enum BackupPurpose { manual, safety, migration }
 
 class BackupFileInfo {
   const BackupFileInfo({
@@ -121,22 +178,22 @@ class BackupFileInfo {
 }
 
 String? _stringValue(Object? value) {
-  if (value == null) {
+  if (value is! String) {
     return null;
   }
-  final text = '$value';
-  return text.isEmpty ? null : text;
+  return value.isEmpty ? null : value;
 }
 
 int? _intValue(Object? value) {
-  if (value is int) {
-    return value;
+  return value is int ? value : null;
+}
+
+BackupPurpose _backupPurposeValue(Object? value) {
+  final name = _stringValue(value);
+  for (final purpose in BackupPurpose.values) {
+    if (purpose.name == name) {
+      return purpose;
+    }
   }
-  if (value is num) {
-    return value.toInt();
-  }
-  if (value is String) {
-    return int.tryParse(value);
-  }
-  return null;
+  throw FormatException('Unsupported backup purpose: $value');
 }

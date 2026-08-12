@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:dio/dio.dart';
+import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -21,10 +22,13 @@ import 'package:research_life/services/analysis/analysis_service.dart';
 import 'package:research_life/services/calendar/institution_calendar_service.dart';
 import 'package:research_life/services/database/repositories/agent_chat_repository.dart';
 import 'package:research_life/services/database/repositories/preferences_repository.dart';
+import 'package:research_life/services/database/app_database.dart'
+    show AppDatabase;
 import 'package:research_life/services/import/import_service.dart';
 import 'package:research_life/services/review/review_service.dart';
 import 'package:research_life/services/storage/backup_service.dart';
 import 'package:research_life/services/storage/local_workspace_service.dart';
+import 'package:research_life/services/storage/local_data_operation_coordinator.dart';
 import 'package:research_life/state/local_backup_controller.dart';
 import 'package:research_life/state/research_life_controller.dart';
 
@@ -261,6 +265,54 @@ void main() {
     expect(find.text('请求已取消'), findsNothing);
     expect(find.byKey(const Key('agent-retry')), findsOneWidget);
   });
+
+  testWidgets('narrow Agent workspace keeps primary controls reachable', (
+    tester,
+  ) async {
+    final fixture = _AgentPageFixture(configured: true);
+    await fixture.pump(tester, size: const Size(500, 700));
+
+    expect(
+      tester.getSize(find.byKey(const Key('agent-history-sidebar'))).width,
+      60,
+    );
+    expect(find.byKey(const Key('agent-settings')), findsOneWidget);
+    expect(find.byKey(const Key('agent-composer')), findsOneWidget);
+    expect(find.byKey(const Key('agent-send')), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'Agent history open and delete persist through real Drift stores',
+    (tester) async {
+      final fixture = _DriftAgentPageFixture();
+      await fixture.configure();
+      final session = await fixture.chats.createSession(
+        profileId: _profile.id,
+        model: _profile.model,
+        title: 'Drift history',
+      );
+      await fixture.chats.appendMessage(
+        sessionId: session.id,
+        role: 'user',
+        content: 'Persisted question',
+      );
+
+      await fixture.pump(tester);
+      await tester.tap(find.byKey(ValueKey('agent-history-${session.id}')));
+      await tester.pumpAndSettle();
+      expect(find.text('Persisted question'), findsOneWidget);
+
+      await tester.tap(
+        find.byKey(ValueKey('agent-delete-session-${session.id}')),
+      );
+      await tester.pumpAndSettle();
+      expect(await fixture.chats.listSessions(), isEmpty);
+
+      await tester.pumpWidget(const SizedBox.shrink());
+      await fixture.close();
+    },
+  );
 }
 
 const _profile = AiProviderProfile(
@@ -322,7 +374,14 @@ final class _AgentPageFixture {
     );
   }
 
-  Future<void> pump(WidgetTester tester) async {
+  Future<void> pump(
+    WidgetTester tester, {
+    Size size = const Size(1100, 760),
+  }) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = size;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    addTearDown(tester.view.resetPhysicalSize);
     addTearDown(backupController.dispose);
     addTearDown(lifeController.dispose);
     await tester.pumpWidget(
@@ -336,14 +395,99 @@ final class _AgentPageFixture {
             restoreAndRestart: (_) => Future<BackupRestoreResult>.error(
               StateError('restore is not used in AgentPage tests'),
             ),
-            child: const Scaffold(
-              body: SizedBox(width: 1100, height: 760, child: AgentPage()),
+            child: Scaffold(
+              body: SizedBox(
+                width: size.width,
+                height: size.height,
+                child: const AgentPage(),
+              ),
             ),
           ),
         ),
       ),
     );
     await tester.pumpAndSettle();
+  }
+}
+
+final class _DriftAgentPageFixture {
+  _DriftAgentPageFixture()
+    : database = AppDatabase(NativeDatabase.memory()),
+      credentials = _MemoryCredentialStore(),
+      adapter = _ScriptedAdapter() {
+    final preferences = PreferencesRepository(database);
+    profiles = AiProfileRepository(preferences);
+    chats = AgentChatRepository(
+      database,
+      operationCoordinator: LocalDataOperationCoordinator(),
+    );
+    backupController = LocalBackupController(
+      backupService: _UnusedBackupService(),
+      migrationPreferences: _UnusedMigrationPreferences(),
+      flushLocalWrites: () async {},
+      restoreRuntime: (_) => Future<BackupRestoreResult>.error(
+        StateError('restore is not used in AgentPage tests'),
+      ),
+    );
+    lifeController = ResearchLifeController(
+      importService: const ImportService(),
+      analysisService: const AnalysisService(),
+      reviewService: const ReviewService(),
+      institutionCalendarService: const InstitutionCalendarService(),
+      localWorkspaceService: const LocalWorkspaceService(),
+    );
+    services = AiRuntimeServices(
+      profiles: profiles,
+      credentials: credentials,
+      chats: chats,
+      client: OpenAiCompatibleChatClient(httpClientAdapter: adapter),
+    );
+  }
+
+  final AppDatabase database;
+  final _MemoryCredentialStore credentials;
+  final _ScriptedAdapter adapter;
+  late final AiProfileRepository profiles;
+  late final AgentChatRepository chats;
+  late final LocalBackupController backupController;
+  late final ResearchLifeController lifeController;
+  late final AiRuntimeServices services;
+  var _closed = false;
+
+  Future<void> configure() async {
+    await profiles.saveActive(_profile);
+    await credentials.write(_profile.id, 'existing-secret');
+  }
+
+  Future<void> pump(WidgetTester tester) async {
+    addTearDown(() async {
+      if (!_closed) await close();
+    });
+    addTearDown(backupController.dispose);
+    addTearDown(lifeController.dispose);
+    await tester.pumpWidget(
+      ResearchLifeScope(
+        controller: lifeController,
+        child: MaterialApp(
+          theme: AppTheme.build(AppColorTheme.green),
+          home: LocalServicesScope(
+            backupController: backupController,
+            aiServices: services,
+            restoreAndRestart: (_) => Future<BackupRestoreResult>.error(
+              StateError('restore is not used in AgentPage tests'),
+            ),
+            child: const Scaffold(body: AgentPage()),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    await database.close();
   }
 }
 

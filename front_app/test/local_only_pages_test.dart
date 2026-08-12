@@ -105,11 +105,20 @@ void main() {
     expect(agent, contains("Key('agent-api-key')"));
     expect(researchWorkspace, contains('AgentPage'));
     expect(settings, contains('LocalBackupPanel'));
+    for (final forbiddenSource in [
+      'AuthScope',
+      '_RemoteLlmAnalysisPanel',
+      '_LegacyRemoteLlmAnalysisPanel',
+      'RemoteLlmAnalysisSettings',
+      '_remoteLlmApiKeyController',
+      'saveRemoteLlmAnalysisSettings(',
+    ]) {
+      expect(settings, isNot(contains(forbiddenSource)));
+    }
     expect(settings, isNot(contains("id: 'agent.llm'")));
     expect(settings, isNot(contains('_AgentLlmPanel')));
     expect(settings, isNot(contains('controller.backupDatabase')));
     expect(settings, isNot(contains('_agentLlmApiKeyController')));
-    expect(settings, isNot(contains('_remoteLlmApiKeyController')));
     expect(settings, isNot(contains('saveAgentLlmSettings(')));
     expect(controller, isNot(contains('AgentLlmSettings')));
     expect(controller, isNot(contains('requestOpenAiSettings')));

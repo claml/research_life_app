@@ -86,4 +86,24 @@ void main() {
     expect(decoded.fallbackToRules, isTrue);
     expect(decoded.strictJsonSchema, isFalse);
   });
+
+  test('saves and loads the local migration backup record', () async {
+    expect(await repository.loadLocalMigrationBackupComplete(), isFalse);
+    expect(await repository.loadLocalMigrationBackupPath(), isNull);
+
+    await repository.saveLocalMigrationBackupRecord(
+      r'C:\backups\migration-safe',
+    );
+
+    expect(
+      await repository.loadLocalMigrationBackupPath(),
+      r'C:\backups\migration-safe',
+    );
+    expect(await repository.loadLocalMigrationBackupComplete(), isTrue);
+
+    await repository.invalidateLocalMigrationBackupRecord();
+
+    expect(await repository.loadLocalMigrationBackupComplete(), isFalse);
+    expect(await repository.loadLocalMigrationBackupPath(), isNull);
+  });
 }
