@@ -330,11 +330,17 @@ class AgentController extends ChangeNotifier {
         if (sessions.isNotEmpty) {
           final next = sessions.first;
           final loaded = await _chats.listMessages(next.id);
+          final recovered = await _recoverLoadedMessages(next.id, loaded);
           if (_disposed || generation != _messageLoadGeneration) return;
           currentSessionId = next.id;
           messages
             ..clear()
-            ..addAll(loaded);
+            ..addAll(recovered.messages);
+          _failedUserMessageIds.remove(next.id);
+          final pendingUserMessageId = recovered.pendingUserMessageId;
+          if (pendingUserMessageId != null) {
+            _failedUserMessageIds[next.id] = pendingUserMessageId;
+          }
         }
       }
     } on Object {

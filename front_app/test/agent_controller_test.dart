@@ -413,6 +413,61 @@ void main() {
     expect(fixture.adapter.calls, 0);
   });
 
+  test(
+    'deleting current session recovers orphaned active next session',
+    () async {
+      await fixture.storeConfiguration();
+      final interrupted = await fixture.chats.createSession(
+        profileId: remoteProfile.id,
+        model: remoteProfile.model,
+        title: 'Interrupted history',
+      );
+      await fixture.chats.appendMessage(
+        sessionId: interrupted.id,
+        role: 'user',
+        content: 'Resume after deleting another session',
+        reasoningContent: const AgentThinkingTrace(
+          status: AgentThinkingStatus.active,
+          steps: ['已保存用户消息', '正在生成回复'],
+        ).encode(),
+      );
+      final answered = await fixture.chats.createSession(
+        profileId: remoteProfile.id,
+        model: remoteProfile.model,
+        title: 'Answered history',
+      );
+      await fixture.chats.appendMessage(
+        sessionId: answered.id,
+        role: 'user',
+        content: 'Answered question',
+      );
+      await fixture.chats.appendMessage(
+        sessionId: answered.id,
+        role: 'assistant',
+        content: 'Answered response',
+      );
+
+      await fixture.controller.bootstrap();
+      expect(fixture.controller.currentSessionId, answered.id);
+
+      await fixture.controller.deleteSession(answered.id);
+
+      expect(fixture.controller.currentSessionId, interrupted.id);
+      expect(fixture.controller.canRetry, isTrue);
+      expect(
+        AgentThinkingTrace.tryDecode(
+          fixture.controller.messages.single.reasoningContent,
+        )?.status,
+        AgentThinkingStatus.stopped,
+      );
+      final stored = await fixture.chats.listMessages(interrupted.id);
+      expect(
+        AgentThinkingTrace.tryDecode(stored.single.reasoningContent)?.status,
+        AgentThinkingStatus.stopped,
+      );
+    },
+  );
+
   test('cancelling an active request is not a user-facing error', () async {
     await fixture.storeConfiguration();
     await fixture.controller.bootstrap();
