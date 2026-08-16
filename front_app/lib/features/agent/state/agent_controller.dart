@@ -23,6 +23,12 @@ class AgentController extends ChangeNotifier {
 
   static const _newSessionTitle = '新对话';
   static const _sessionTitleLength = 30;
+  static const _thinkingSaved = '已保存用户消息';
+  static const _thinkingContext = '已整理对话上下文';
+  static const _thinkingGenerating = '正在生成回复';
+  static const _thinkingCompleted = '已生成回复';
+  static const _thinkingFailed = '请求 AI 服务失败';
+  static const _thinkingStopped = '请求已停止';
 
   final AiProfileStore _profiles;
   final AiCredentialStore _credentials;
@@ -339,6 +345,7 @@ class AgentController extends ChangeNotifier {
     sending = true;
     error = null;
     _notify();
+    AgentChatMessage? userMessage;
     try {
       if (!await _persistVolatileAssistant(operation: operation)) return;
       if (_operationStopped(operation)) return;
@@ -346,7 +353,6 @@ class AgentController extends ChangeNotifier {
       final request = await _prepareRequest(operation);
       if (request == null || _operationStopped(operation)) return;
 
-      AgentChatMessage? userMessage;
       try {
         var sessionId = currentSessionId;
         if (sessionId == null) {
@@ -364,12 +370,21 @@ class AgentController extends ChangeNotifier {
           sessionId: sessionId,
           role: 'user',
           content: trimmed,
+          reasoningContent: _activeThinkingTrace(
+            trailingStep: '正在整理对话上下文',
+          ).encode(),
         );
         messages.add(userMessage);
         _failedUserMessageIds[sessionId] = userMessage.id;
+        _notify();
         if (_operationStopped(operation)) return;
 
         final context = await _chats.listMessages(sessionId);
+        if (_operationStopped(operation)) return;
+        await _setThinkingTrace(
+          userMessage,
+          _activeThinkingTrace(trailingStep: _thinkingGenerating),
+        );
         if (_operationStopped(operation)) return;
         await _completePersistedUserMessage(
           operation: operation,
@@ -382,9 +397,21 @@ class AgentController extends ChangeNotifier {
           error = userMessage == null
               ? '无法保存本地消息，未发送网络请求。'
               : '无法读取本地消息，未发送网络请求。';
+          if (userMessage != null) {
+            await _setThinkingTrace(
+              userMessage,
+              _terminalThinkingTrace(AgentThinkingStatus.failed, '读取本地消息失败'),
+            );
+          }
         }
       }
     } finally {
+      if (!_disposed && operation.cancelled && userMessage != null) {
+        await _setThinkingTrace(
+          userMessage,
+          _terminalThinkingTrace(AgentThinkingStatus.stopped, _thinkingStopped),
+        );
+      }
       _finishOperation(operation);
     }
   }
@@ -401,6 +428,7 @@ class AgentController extends ChangeNotifier {
     sending = true;
     error = null;
     _notify();
+    AgentChatMessage? userMessage;
     try {
       if (!await _persistVolatileAssistant(operation: operation)) return;
       if (_operationStopped(operation) ||
@@ -415,9 +443,25 @@ class AgentController extends ChangeNotifier {
       try {
         final context = await _chats.listMessages(sessionId);
         if (_operationStopped(operation)) return;
-        final userMessage = context.singleWhere(
+        userMessage = context.singleWhere(
           (message) => message.id == failedId && message.isUser,
         );
+        await _setThinkingTrace(
+          userMessage,
+          _activeThinkingTrace(trailingStep: _thinkingGenerating),
+        );
+        if (_operationStopped(operation)) {
+          if (!_disposed && operation.cancelled) {
+            await _setThinkingTrace(
+              userMessage,
+              _terminalThinkingTrace(
+                AgentThinkingStatus.stopped,
+                _thinkingStopped,
+              ),
+            );
+          }
+          return;
+        }
         await _completePersistedUserMessage(
           operation: operation,
           request: request,
@@ -427,6 +471,12 @@ class AgentController extends ChangeNotifier {
       } on Object {
         if (!_operationStopped(operation)) {
           error = '无法读取待重试的本地消息。';
+          if (userMessage != null) {
+            await _setThinkingTrace(
+              userMessage,
+              _terminalThinkingTrace(AgentThinkingStatus.failed, '读取本地消息失败'),
+            );
+          }
         }
       }
     } finally {
@@ -494,12 +544,27 @@ class AgentController extends ChangeNotifier {
         cancelToken: operation.cancelToken,
       );
     } on AiChatClientException catch (failure) {
+      await _setThinkingTrace(
+        userMessage,
+        _terminalThinkingTrace(
+          failure.kind == AiChatClientExceptionKind.cancelled
+              ? AgentThinkingStatus.stopped
+              : AgentThinkingStatus.failed,
+          failure.kind == AiChatClientExceptionKind.cancelled
+              ? _thinkingStopped
+              : _thinkingFailed,
+        ),
+      );
       if (failure.kind != AiChatClientExceptionKind.cancelled &&
           !_operationStopped(operation)) {
         error = failure.message;
       }
       return;
     } on Object {
+      await _setThinkingTrace(
+        userMessage,
+        _terminalThinkingTrace(AgentThinkingStatus.failed, _thinkingFailed),
+      );
       if (!_operationStopped(operation)) {
         error = 'AI 服务请求失败，请稍后重试。';
       }
@@ -539,6 +604,15 @@ class AgentController extends ChangeNotifier {
     messages.add(assistantMessage);
     volatileAssistantMessage = null;
     _failedUserMessageIds.remove(sessionId);
+    if (!_operationStopped(operation)) {
+      await _setThinkingTrace(
+        userMessage,
+        _terminalThinkingTrace(
+          AgentThinkingStatus.completed,
+          _thinkingCompleted,
+        ),
+      );
+    }
     final pendingUpdate = _PendingSessionUpdate(
       sessionId: sessionId,
       userContent: userMessage.content,
@@ -551,6 +625,56 @@ class AgentController extends ChangeNotifier {
     if (!await _updateSessionAfterAssistant(pendingUpdate)) {
       _pendingSessionUpdate = pendingUpdate;
     }
+  }
+
+  AgentThinkingTrace _activeThinkingTrace({required String trailingStep}) {
+    return AgentThinkingTrace(
+      status: AgentThinkingStatus.active,
+      steps: [
+        _thinkingSaved,
+        if (trailingStep != '正在整理对话上下文') _thinkingContext,
+        trailingStep,
+      ],
+    );
+  }
+
+  AgentThinkingTrace _terminalThinkingTrace(
+    AgentThinkingStatus status,
+    String trailingStep,
+  ) {
+    return AgentThinkingTrace(
+      status: status,
+      steps: [_thinkingSaved, _thinkingContext, trailingStep],
+    );
+  }
+
+  Future<void> _setThinkingTrace(
+    AgentChatMessage message,
+    AgentThinkingTrace trace,
+  ) async {
+    if (_disposed) return;
+    AgentChatMessage updated;
+    try {
+      updated = await _chats.updateMessageReasoningContent(
+        messageId: message.id,
+        reasoningContent: trace.encode(),
+      );
+    } on Object {
+      updated = AgentChatMessage(
+        id: message.id,
+        sessionId: message.sessionId,
+        role: message.role,
+        content: message.content,
+        reasoningContent: trace.encode(),
+        model: message.model,
+        createdAt: message.createdAt,
+      );
+    }
+    final index = messages.indexWhere(
+      (candidate) => candidate.id == message.id,
+    );
+    if (index >= 0) messages[index] = updated;
+    _notify();
   }
 
   Future<bool> _persistVolatileAssistant({_AgentOperation? operation}) {
@@ -625,6 +749,15 @@ class AgentController extends ChangeNotifier {
         firstUser = message;
         break;
       }
+    }
+    if (firstUser != null) {
+      await _setThinkingTrace(
+        firstUser,
+        _terminalThinkingTrace(
+          AgentThinkingStatus.completed,
+          _thinkingCompleted,
+        ),
+      );
     }
     final recoveredUpdate = _PendingSessionUpdate(
       sessionId: persisted.sessionId,

@@ -29,6 +29,11 @@ abstract interface class AgentChatStore {
     String? model,
   });
 
+  Future<domain.AgentChatMessage> updateMessageReasoningContent({
+    required int messageId,
+    required String? reasoningContent,
+  });
+
   Future<void> deleteSession(int sessionId);
 }
 
@@ -134,6 +139,23 @@ class AgentChatRepository implements AgentChatStore {
         ),
       );
       return _sessionById(sessionId);
+    });
+  }
+
+  @override
+  Future<domain.AgentChatMessage> updateMessageReasoningContent({
+    required int messageId,
+    required String? reasoningContent,
+  }) {
+    return _operationCoordinator.runExclusive(() async {
+      await (_database.update(
+        _database.agentChatMessages,
+      )..where((message) => message.id.equals(messageId))).write(
+        db.AgentChatMessagesCompanion(
+          reasoningContent: Value(reasoningContent),
+        ),
+      );
+      return _messageById(messageId);
     });
   }
 

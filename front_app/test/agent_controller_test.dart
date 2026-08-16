@@ -90,11 +90,35 @@ void main() {
       final stored = await fixture.chats.listMessages(sessions.single.id);
       expect(stored.map((message) => message.content), ['Committed first']);
       expect(stored.single.isUser, isTrue);
+      expect(
+        AgentThinkingTrace.tryDecode(stored.single.reasoningContent)?.status,
+        AgentThinkingStatus.active,
+      );
 
       fixture.adapter.completeBlocked('Assistant answer');
       await send;
+      final completed = await fixture.chats.listMessages(sessions.single.id);
+      expect(
+        AgentThinkingTrace.tryDecode(completed.first.reasoningContent)?.status,
+        AgentThinkingStatus.completed,
+      );
     },
   );
+
+  test('failed request persists a failed thinking trace', () async {
+    await fixture.storeConfiguration();
+    await fixture.controller.bootstrap();
+    fixture.adapter.failNext();
+
+    await fixture.controller.sendMessage('Trace this failure');
+
+    final stored = await fixture.chats.listMessages(
+      fixture.controller.currentSessionId!,
+    );
+    final trace = AgentThinkingTrace.tryDecode(stored.first.reasoningContent);
+    expect(trace?.status, AgentThinkingStatus.failed);
+    expect(trace?.steps, contains('请求 AI 服务失败'));
+  });
 
   test(
     'successful send persists assistant and truncates first title',
@@ -204,6 +228,12 @@ void main() {
       fixture.controller.volatileAssistantMessage?.content,
       'Visible but volatile',
     );
+    expect(
+      AgentThinkingTrace.tryDecode(
+        fixture.controller.messages.first.reasoningContent,
+      )?.status,
+      AgentThinkingStatus.active,
+    );
     expect(fixture.controller.error, isNotNull);
     expect(fixture.controller.canRetry, isFalse);
   });
@@ -259,6 +289,13 @@ void main() {
     expect(
       fixture.controller.messages.where((message) => message.isUser),
       hasLength(1),
+    );
+    final stored = await fixture.chats.listMessages(
+      fixture.controller.currentSessionId!,
+    );
+    expect(
+      AgentThinkingTrace.tryDecode(stored.first.reasoningContent)?.status,
+      AgentThinkingStatus.stopped,
     );
   });
 
@@ -1093,6 +1130,15 @@ final class _ControlledChatStore implements AgentChatStore {
 
   @override
   Future<List<AgentChatSession>> listSessions() => _delegate.listSessions();
+
+  @override
+  Future<AgentChatMessage> updateMessageReasoningContent({
+    required int messageId,
+    required String? reasoningContent,
+  }) => _delegate.updateMessageReasoningContent(
+    messageId: messageId,
+    reasoningContent: reasoningContent,
+  );
 
   @override
   Future<AgentChatSession> updateSessionAfterReply({

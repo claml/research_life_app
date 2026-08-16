@@ -214,6 +214,10 @@ void main() {
       tester.getSize(find.byKey(const Key('agent-history-sidebar'))).width,
       60,
     );
+    expect(
+      tester.getSize(find.byKey(const Key('agent-history-collapse-cap'))),
+      const Size(48, 48),
+    );
     await tester.tap(find.byKey(const Key('agent-expand-history')));
     await tester.pumpAndSettle();
 
@@ -293,6 +297,7 @@ void main() {
         hasLength(1),
       );
       expect(find.byKey(const Key('agent-retry')), findsOneWidget);
+      expect(find.text('生成失败'), findsOneWidget);
       expect(find.text('需要重试的问题'), findsOneWidget);
       fixture.adapter.replyNext('重试后的 **答案**');
       await tester.tap(find.byKey(const Key('agent-retry')));
@@ -341,12 +346,53 @@ void main() {
     expect(fixture.adapter.requestStarted.isCompleted, isTrue);
     await tester.pump();
     expect(find.byTooltip('取消请求'), findsOneWidget);
+    expect(find.text('正在思考'), findsOneWidget);
+    final userTop = tester.getTopLeft(find.text('取消这次请求')).dy;
+    final thinkingTop = tester
+        .getTopLeft(find.byKey(const Key('agent-thinking-trace')))
+        .dy;
+    expect(thinkingTop, greaterThan(userTop));
+
+    await tester.tap(find.byKey(const Key('agent-thinking-toggle')));
+    await tester.pump();
+    expect(find.text('正在生成回复'), findsNothing);
 
     await tester.tap(find.byKey(const Key('agent-send')));
     await tester.pumpAndSettle();
 
     expect(find.text('请求已取消'), findsNothing);
+    expect(find.text('已停止'), findsOneWidget);
     expect(find.byKey(const Key('agent-retry')), findsOneWidget);
+  });
+
+  testWidgets('completed thinking trace stays in history and can expand', (
+    tester,
+  ) async {
+    final fixture = _AgentPageFixture(configured: true);
+    fixture.adapter.replyNext('完成后的回答');
+    await fixture.pump(tester);
+
+    await tester.enterText(find.byKey(const Key('agent-composer')), '保留思考进度');
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('agent-send')));
+    for (
+      var frame = 0;
+      frame < 30 && find.text('思考完成').evaluate().isEmpty;
+      frame++
+    ) {
+      await tester.pump(const Duration(milliseconds: 20));
+    }
+
+    final stored = fixture.chats.messages.values.single;
+    expect(
+      AgentThinkingTrace.tryDecode(stored.first.reasoningContent)?.status,
+      AgentThinkingStatus.completed,
+    );
+    expect(find.text('思考完成'), findsOneWidget);
+    expect(find.text('正在生成回复'), findsNothing);
+    await tester.tap(find.byKey(const Key('agent-thinking-toggle')));
+    await tester.pump();
+    expect(find.text('已生成回复'), findsOneWidget);
   });
 
   testWidgets('narrow Agent workspace keeps primary controls reachable', (
@@ -384,6 +430,10 @@ void main() {
 
     await tester.tap(find.byKey(const Key('agent-collapse-history')));
     await tester.pumpAndSettle();
+    expect(
+      tester.getSize(find.byKey(const Key('agent-history-collapse-cap'))),
+      const Size(48, 48),
+    );
     final expandButton = tester.widget<IconButton>(
       find.byKey(const Key('agent-expand-history')),
     );
@@ -743,6 +793,32 @@ final class _MemoryChatStore implements AgentChatStore {
   @override
   Future<List<AgentChatSession>> listSessions() async =>
       List<AgentChatSession>.of(sessions);
+
+  @override
+  Future<AgentChatMessage> updateMessageReasoningContent({
+    required int messageId,
+    required String? reasoningContent,
+  }) async {
+    for (final entry in messages.entries) {
+      final index = entry.value.indexWhere(
+        (message) => message.id == messageId,
+      );
+      if (index < 0) continue;
+      final current = entry.value[index];
+      final updated = AgentChatMessage(
+        id: current.id,
+        sessionId: current.sessionId,
+        role: current.role,
+        content: current.content,
+        reasoningContent: reasoningContent,
+        model: current.model,
+        createdAt: current.createdAt,
+      );
+      entry.value[index] = updated;
+      return updated;
+    }
+    throw StateError('Message $messageId does not exist');
+  }
 
   @override
   Future<AgentChatSession> updateSessionAfterReply({

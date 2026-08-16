@@ -12,7 +12,9 @@ import '../../services/agent/ai_profile.dart';
 import 'state/agent_controller.dart';
 
 class AgentPage extends StatefulWidget {
-  const AgentPage({super.key});
+  const AgentPage({this.embedded = false, super.key});
+
+  final bool embedded;
 
   @override
   State<AgentPage> createState() => _AgentPageState();
@@ -86,6 +88,7 @@ class _AgentPageState extends State<AgentPage> {
       onExpandSidebar: () => setState(() => _sidebarCollapsed = false),
       onOpenSettings: _showSettings,
       onSend: _send,
+      embedded: widget.embedded,
     );
   }
 }
@@ -100,6 +103,7 @@ class _AgentWorkspace extends StatelessWidget {
     required this.onExpandSidebar,
     required this.onOpenSettings,
     required this.onSend,
+    required this.embedded,
   });
 
   final AgentController controller;
@@ -110,6 +114,7 @@ class _AgentWorkspace extends StatelessWidget {
   final VoidCallback onExpandSidebar;
   final VoidCallback onOpenSettings;
   final VoidCallback onSend;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -143,6 +148,7 @@ class _AgentWorkspace extends StatelessWidget {
                           _AgentTopBar(
                             controller: controller,
                             narrow: narrow,
+                            embedded: embedded,
                             onOpenSettings: onOpenSettings,
                           ),
                           Expanded(
@@ -178,11 +184,13 @@ class _AgentTopBar extends StatelessWidget {
     required this.controller,
     required this.narrow,
     required this.onOpenSettings,
+    required this.embedded,
   });
 
   final AgentController controller;
   final bool narrow;
   final VoidCallback onOpenSettings;
+  final bool embedded;
 
   @override
   Widget build(BuildContext context) {
@@ -198,7 +206,7 @@ class _AgentTopBar extends StatelessWidget {
       ),
       child: Row(
         children: [
-          if (Navigator.of(context).canPop()) ...[
+          if (!embedded && Navigator.of(context).canPop()) ...[
             IconButton(
               tooltip: '关闭 AI 助手',
               onPressed: () => Navigator.of(context).pop(),
@@ -296,118 +304,129 @@ class _HistoryRail extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
+    if (collapsed) {
+      return SizedBox(
+        key: const Key('agent-history-sidebar'),
+        width: 60,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 12),
+          child: Align(
+            alignment: Alignment.topCenter,
+            child: Container(
+              key: const Key('agent-history-collapse-cap'),
+              width: 48,
+              height: 48,
+              decoration: BoxDecoration(
+                color: tokens.sidebarSurface.withValues(alpha: 0.96),
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                boxShadow: tokens.shadowSm,
+              ),
+              child: onExpand == null
+                  ? const Icon(Icons.history_rounded, color: Colors.white70)
+                  : IconButton(
+                      key: const Key('agent-expand-history'),
+                      tooltip: '展开历史记录',
+                      onPressed: onExpand,
+                      style: IconButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: Colors.transparent,
+                        hoverColor: Colors.white.withValues(alpha: 0.1),
+                        highlightColor: Colors.transparent,
+                      ),
+                      icon: const Icon(Icons.chevron_right_rounded),
+                    ),
+            ),
+          ),
+        ),
+      );
+    }
     return Container(
       key: const Key('agent-history-sidebar'),
-      width: collapsed ? 60 : 240,
+      width: 240,
       decoration: BoxDecoration(
         color: tokens.sidebarSurface.withValues(alpha: 0.96),
         border: Border(right: BorderSide(color: tokens.borderFaint)),
       ),
-      child: collapsed
-          ? Align(
-              alignment: Alignment.topCenter,
-              child: Padding(
-                padding: const EdgeInsets.only(top: 12),
-                child: onExpand == null
-                    ? const Icon(Icons.history_rounded, color: Colors.white70)
-                    : IconButton(
-                        key: const Key('agent-expand-history'),
-                        tooltip: '展开历史记录',
-                        onPressed: onExpand,
-                        style: IconButton.styleFrom(
-                          foregroundColor: Colors.white,
-                          backgroundColor: Colors.transparent,
-                          hoverColor: Colors.white.withValues(alpha: 0.1),
-                          highlightColor: Colors.transparent,
-                        ),
-                        icon: const Icon(Icons.chevron_right_rounded),
-                      ),
-              ),
-            )
-          : Column(
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 6, 10),
+            child: Row(
               children: [
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(14, 14, 6, 10),
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: FilledButton.icon(
-                          key: const Key('agent-new-session'),
-                          onPressed: controller.isBusy
-                              ? null
-                              : () => controller.startNewSession(),
-                          style: FilledButton.styleFrom(
-                            backgroundColor: Colors.white.withValues(
-                              alpha: 0.12,
-                            ),
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(vertical: 11),
-                          ),
-                          icon: const Icon(Icons.add_rounded, size: 17),
-                          label: const Text('新对话'),
-                        ),
-                      ),
-                      IconButton(
-                        key: const Key('agent-collapse-history'),
-                        tooltip: '收起历史记录',
-                        onPressed: onCollapse,
-                        color: Colors.white70,
-                        style: IconButton.styleFrom(
-                          backgroundColor: Colors.white.withValues(alpha: 0.08),
-                          hoverColor: Colors.white.withValues(alpha: 0.12),
-                          highlightColor: Colors.transparent,
-                          disabledBackgroundColor: Colors.transparent,
-                        ),
-                        icon: const Icon(Icons.chevron_left_rounded),
-                      ),
-                    ],
-                  ),
-                ),
-                const Padding(
-                  padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
-                  child: Align(
-                    alignment: Alignment.centerLeft,
-                    child: Text(
-                      '本地历史',
-                      style: TextStyle(
-                        color: Colors.white60,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
-                ),
                 Expanded(
-                  child:
-                      controller.loadingSessions && controller.sessions.isEmpty
-                      ? const Center(
-                          child: SizedBox.square(
-                            dimension: 20,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              color: Colors.white70,
-                            ),
-                          ),
-                        )
-                      : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
-                          itemCount: controller.sessions.length,
-                          itemBuilder: (context, index) {
-                            final session = controller.sessions[index];
-                            return _HistoryTile(
-                              session: session,
-                              selected:
-                                  controller.currentSessionId == session.id,
-                              onOpen: () => controller.openSession(session.id),
-                              onDelete: () =>
-                                  controller.deleteSession(session.id),
-                            );
-                          },
-                        ),
+                  child: FilledButton.icon(
+                    key: const Key('agent-new-session'),
+                    onPressed: controller.isBusy
+                        ? null
+                        : () => controller.startNewSession(),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.12),
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      padding: const EdgeInsets.symmetric(vertical: 11),
+                    ),
+                    icon: const Icon(Icons.add_rounded, size: 17),
+                    label: const Text('新对话'),
+                  ),
+                ),
+                IconButton(
+                  key: const Key('agent-collapse-history'),
+                  tooltip: '收起历史记录',
+                  onPressed: onCollapse,
+                  color: Colors.white70,
+                  style: IconButton.styleFrom(
+                    backgroundColor: Colors.white.withValues(alpha: 0.08),
+                    hoverColor: Colors.white.withValues(alpha: 0.12),
+                    highlightColor: Colors.transparent,
+                    disabledBackgroundColor: Colors.transparent,
+                  ),
+                  icon: const Icon(Icons.chevron_left_rounded),
                 ),
               ],
             ),
+          ),
+          const Padding(
+            padding: EdgeInsets.fromLTRB(16, 4, 16, 8),
+            child: Align(
+              alignment: Alignment.centerLeft,
+              child: Text(
+                '本地历史',
+                style: TextStyle(
+                  color: Colors.white60,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+          Expanded(
+            child: controller.loadingSessions && controller.sessions.isEmpty
+                ? const Center(
+                    child: SizedBox.square(
+                      dimension: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: Colors.white70,
+                      ),
+                    ),
+                  )
+                : ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                    itemCount: controller.sessions.length,
+                    itemBuilder: (context, index) {
+                      final session = controller.sessions[index];
+                      return _HistoryTile(
+                        session: session,
+                        selected: controller.currentSessionId == session.id,
+                        onOpen: () => controller.openSession(session.id),
+                        onDelete: () => controller.deleteSession(session.id),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 }
@@ -589,32 +608,174 @@ class _MessageList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final tokens = context.tokens;
     return ListView.builder(
       controller: scrollController,
       padding: const EdgeInsets.fromLTRB(28, 24, 28, 10),
-      itemCount: controller.messages.length + (controller.sending ? 1 : 0),
+      itemCount: controller.messages.length,
       itemBuilder: (context, index) {
-        if (index == controller.messages.length) {
-          return Padding(
-            padding: const EdgeInsets.only(top: 4, bottom: 16),
-            child: Row(
-              children: [
-                SizedBox.square(
-                  dimension: 17,
-                  child: CircularProgressIndicator(
-                    strokeWidth: 2,
-                    color: tokens.accent,
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Text('正在请求服务…', style: TextStyle(color: tokens.textMuted)),
-              ],
-            ),
-          );
-        }
-        return _MessageBubble(message: controller.messages[index]);
+        final message = controller.messages[index];
+        final thinking = message.isUser
+            ? AgentThinkingTrace.tryDecode(message.reasoningContent)
+            : null;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _MessageBubble(message: message),
+            if (thinking != null)
+              _ThinkingTraceCard(messageId: message.id, trace: thinking),
+          ],
+        );
       },
+    );
+  }
+}
+
+class _ThinkingTraceCard extends StatefulWidget {
+  const _ThinkingTraceCard({required this.messageId, required this.trace});
+
+  final int messageId;
+  final AgentThinkingTrace trace;
+
+  @override
+  State<_ThinkingTraceCard> createState() => _ThinkingTraceCardState();
+}
+
+class _ThinkingTraceCardState extends State<_ThinkingTraceCard> {
+  late bool _expanded = widget.trace.status == AgentThinkingStatus.active;
+
+  @override
+  void didUpdateWidget(covariant _ThinkingTraceCard oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.trace.status == AgentThinkingStatus.active &&
+        widget.trace.status != AgentThinkingStatus.active) {
+      _expanded = false;
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    final status = widget.trace.status;
+    final isActive = status == AgentThinkingStatus.active;
+    final (title, icon, color, background) = switch (status) {
+      AgentThinkingStatus.active => (
+        '正在思考',
+        Icons.auto_awesome_rounded,
+        tokens.accent,
+        tokens.accentSoft,
+      ),
+      AgentThinkingStatus.completed => (
+        '思考完成',
+        Icons.check_circle_outline_rounded,
+        tokens.success,
+        tokens.successSoft,
+      ),
+      AgentThinkingStatus.failed => (
+        '生成失败',
+        Icons.error_outline_rounded,
+        tokens.danger,
+        tokens.dangerSoft,
+      ),
+      AgentThinkingStatus.stopped => (
+        '已停止',
+        Icons.stop_circle_outlined,
+        tokens.textSecondary,
+        tokens.panelSubtle,
+      ),
+    };
+    return Container(
+      key: const Key('agent-thinking-trace'),
+      constraints: const BoxConstraints(maxWidth: 560),
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: background.withValues(alpha: 0.62),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          InkWell(
+            key: const Key('agent-thinking-toggle'),
+            borderRadius: BorderRadius.circular(14),
+            onTap: () => setState(() => _expanded = !_expanded),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 10),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  if (isActive)
+                    SizedBox.square(
+                      dimension: 16,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        color: color,
+                      ),
+                    )
+                  else
+                    Icon(icon, size: 17, color: color),
+                  const SizedBox(width: 9),
+                  Text(
+                    title,
+                    style: TextStyle(
+                      color: tokens.textPrimary,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 7),
+                  Icon(
+                    _expanded
+                        ? Icons.keyboard_arrow_up_rounded
+                        : Icons.keyboard_arrow_down_rounded,
+                    size: 18,
+                    color: tokens.textMuted,
+                  ),
+                ],
+              ),
+            ),
+          ),
+          if (_expanded)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  for (
+                    var index = 0;
+                    index < widget.trace.steps.length;
+                    index++
+                  )
+                    Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isActive && index == widget.trace.steps.length - 1
+                                ? Icons.more_horiz_rounded
+                                : Icons.check_rounded,
+                            size: 15,
+                            color: index == widget.trace.steps.length - 1
+                                ? color
+                                : tokens.textMuted,
+                          ),
+                          const SizedBox(width: 8),
+                          Text(
+                            widget.trace.steps[index],
+                            style: TextStyle(
+                              color: tokens.textSecondary,
+                              fontSize: 12.5,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                ],
+              ),
+            ),
+        ],
+      ),
     );
   }
 }
