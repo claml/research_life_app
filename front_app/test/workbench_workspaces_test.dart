@@ -84,6 +84,35 @@ void main() {
     navigation.dispose();
   });
 
+  testWidgets(
+    'Materials renders a requested document without exposing it as a tab',
+    (tester) async {
+      final controller = _createController();
+      final navigation = WorkbenchNavigationController(
+        initialWorkspace: WorkbenchWorkspace.materials,
+      );
+      final pages = _pagesFor(WorkbenchWorkspace.materials)
+        ..[WorkbenchTab.materialsDocumentView] = const Center(
+          child: Text('请求的文档内容'),
+        );
+
+      await tester.pumpWidget(
+        _testApp(
+          controller,
+          MaterialsWorkspace(navigation: navigation, pages: pages),
+        ),
+      );
+      navigation.navigateToTab(WorkbenchTab.materialsDocumentView);
+      await tester.pump();
+
+      expect(find.text('请求的文档内容'), findsOneWidget);
+      expect(find.text('文件'), findsOneWidget);
+      expect(find.text('PDF 工具'), findsOneWidget);
+      expect(find.text('文档查看'), findsNothing);
+      navigation.dispose();
+    },
+  );
+
   testWidgets('Today quick capture is a single primary action', (tester) async {
     final controller = _createController();
     final navigation = WorkbenchNavigationController();

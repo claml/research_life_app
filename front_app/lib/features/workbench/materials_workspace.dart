@@ -19,6 +19,7 @@ class MaterialsWorkspace extends StatelessWidget {
       key: const Key('materials-workspace'),
       workspace: WorkbenchWorkspace.materials,
       navigation: navigation,
+      contextualTabs: const [WorkbenchTab.materialsDocumentView],
       pages:
           pages ??
           const {

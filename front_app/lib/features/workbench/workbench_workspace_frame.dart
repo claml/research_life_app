@@ -10,6 +10,7 @@ class WorkbenchWorkspaceFrame extends StatelessWidget {
     required this.workspace,
     required this.navigation,
     required this.pages,
+    this.contextualTabs = const [],
     this.primaryAction,
     super.key,
   });
@@ -17,6 +18,7 @@ class WorkbenchWorkspaceFrame extends StatelessWidget {
   final WorkbenchWorkspace workspace;
   final WorkbenchNavigationController navigation;
   final Map<WorkbenchTab, Widget> pages;
+  final List<WorkbenchTab> contextualTabs;
   final Widget? primaryAction;
 
   @override
@@ -25,12 +27,17 @@ class WorkbenchWorkspaceFrame extends StatelessWidget {
       animation: navigation,
       builder: (context, _) {
         final tabs = workspace.tabs;
+        final renderableTabs = [
+          ...tabs,
+          for (final tab in contextualTabs)
+            if (!tabs.contains(tab)) tab,
+        ];
         final selected = navigation.selectedTabs[workspace]!;
-        final selectedIndex = tabs.indexOf(selected);
+        final selectedIndex = renderableTabs.indexOf(selected);
         final content = IndexedStack(
           index: selectedIndex < 0 ? 0 : selectedIndex,
           children: [
-            for (final tab in tabs)
+            for (final tab in renderableTabs)
               KeyedSubtree(
                 key: ValueKey('workspace-page-${tab.name}'),
                 child: pages[tab] ?? const SizedBox.shrink(),
