@@ -52,6 +52,7 @@ class AgentController extends ChangeNotifier {
   final Map<int, int> _failedUserMessageIds = <int, int>{};
   _PendingSessionUpdate? _pendingSessionUpdate;
   Future<bool>? _volatileRecoveryFuture;
+  int? _volatileAssistantUserMessageId;
   _AgentOperation? _activeOperation;
   int _nextOperationId = 0;
   int _messageLoadGeneration = 0;
@@ -480,6 +481,12 @@ class AgentController extends ChangeNotifier {
         }
       }
     } finally {
+      if (!_disposed && operation.cancelled && userMessage != null) {
+        await _setThinkingTrace(
+          userMessage,
+          _terminalThinkingTrace(AgentThinkingStatus.stopped, _thinkingStopped),
+        );
+      }
       _finishOperation(operation);
     }
   }
@@ -593,6 +600,7 @@ class AgentController extends ChangeNotifier {
         createdAt: DateTime.now(),
       );
       volatileAssistantMessage = volatileMessage;
+      _volatileAssistantUserMessageId = userMessage.id;
       messages.add(volatileMessage);
       _failedUserMessageIds.remove(sessionId);
       if (!_operationStopped(operation)) {
@@ -603,6 +611,7 @@ class AgentController extends ChangeNotifier {
 
     messages.add(assistantMessage);
     volatileAssistantMessage = null;
+    _volatileAssistantUserMessageId = null;
     _failedUserMessageIds.remove(sessionId);
     if (!_operationStopped(operation)) {
       await _setThinkingTrace(
@@ -741,18 +750,23 @@ class AgentController extends ChangeNotifier {
       messages.add(persisted);
     }
     volatileAssistantMessage = null;
+    final originatingUserMessageId = _volatileAssistantUserMessageId;
+    _volatileAssistantUserMessageId = null;
     _failedUserMessageIds.remove(persisted.sessionId);
 
     AgentChatMessage? firstUser;
+    AgentChatMessage? originatingUser;
     for (final message in messages) {
       if (message.sessionId == persisted.sessionId && message.isUser) {
-        firstUser = message;
-        break;
+        firstUser ??= message;
+        if (message.id == originatingUserMessageId) {
+          originatingUser = message;
+        }
       }
     }
-    if (firstUser != null) {
+    if (originatingUser != null) {
       await _setThinkingTrace(
-        firstUser,
+        originatingUser,
         _terminalThinkingTrace(
           AgentThinkingStatus.completed,
           _thinkingCompleted,
@@ -885,6 +899,7 @@ class AgentController extends ChangeNotifier {
   void _clearTransientMessageState() {
     _pendingSessionUpdate = null;
     volatileAssistantMessage = null;
+    _volatileAssistantUserMessageId = null;
   }
 
   void _upsertSession(AgentChatSession session) {

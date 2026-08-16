@@ -177,6 +177,32 @@ void main() {
     expect(fixture.controller.canRetry, isFalse);
   });
 
+  test(
+    'cancelling a retry after its assistant persists stops its trace',
+    () async {
+      await fixture.storeConfiguration();
+      await fixture.controller.bootstrap();
+      fixture.adapter.failNext();
+      await fixture.controller.sendMessage('Retry cancellation trace');
+      final assistantAppend = fixture.chats.blockNextAssistantAppend();
+      fixture.adapter.replyNext('Persisted after cancellation');
+
+      final retry = fixture.controller.retryFailedMessage();
+      await assistantAppend.started.future;
+      fixture.controller.cancelActiveRequest();
+      assistantAppend.release.complete();
+      await retry;
+
+      final stored = await fixture.chats.listMessages(
+        fixture.controller.currentSessionId!,
+      );
+      expect(
+        AgentThinkingTrace.tryDecode(stored.first.reasoningContent)?.status,
+        AgentThinkingStatus.stopped,
+      );
+    },
+  );
+
   test('only one send may be in flight', () async {
     await fixture.storeConfiguration();
     await fixture.controller.bootstrap();
@@ -584,6 +610,33 @@ void main() {
         {'role': 'assistant', 'content': 'First volatile answer'},
         {'role': 'user', 'content': 'Second user'},
       ]);
+    },
+  );
+
+  test(
+    'volatile recovery completes the later originating user trace',
+    () async {
+      await fixture.storeConfiguration();
+      await fixture.controller.bootstrap();
+      fixture.adapter.replyNext('First persisted answer');
+      await fixture.controller.sendMessage('First user');
+      fixture.chats.failNextAssistantAppend = true;
+      fixture.adapter.replyNext('Second volatile answer');
+      await fixture.controller.sendMessage('Second user');
+      final sessionId = fixture.controller.currentSessionId!;
+
+      await fixture.controller.startNewSession();
+
+      final stored = await fixture.chats.listMessages(sessionId);
+      final users = stored.where((message) => message.isUser).toList();
+      expect(
+        AgentThinkingTrace.tryDecode(users.first.reasoningContent)?.status,
+        AgentThinkingStatus.completed,
+      );
+      expect(
+        AgentThinkingTrace.tryDecode(users.last.reasoningContent)?.status,
+        AgentThinkingStatus.completed,
+      );
     },
   );
 
