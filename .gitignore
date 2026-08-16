@@ -6,3 +6,5 @@
 应用/
 *.log
 *.tmp
+/.qa/
+/front_app/.run_logs/

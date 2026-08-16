@@ -134,20 +134,33 @@ main.dart
 - 数据持久化通过 `services/database/repositories/*` 封装，底层 schema 在 `services/database/app_database.dart`。
 - 应用关闭时会等待 pending persistence，并按设置清理桌宠浮层状态。
 
-## 7. 功能模块
+## 7. 当前工作台导航（2026-08-16）
 
-| 模块 | 页面文件 | 当前能力 |
+当前信息架构以 `docs/superpowers/specs/2026-08-16-workbench-navigation-ai-finish-design.md` 为准：
+
+- 全局入口：天气、AI 助手、日历
+- 今日：今日时间线、未完成待办、优先级和已完成事项
+- 科研：概览、文献、笔记、统计
+- 生活：校园、周分析、人物
+- 资料：资料库、PDF 工具
+- 设置：设置概览
+
+天气、AI 助手和日历互斥；选择任何工作区或其页签会关闭这些全局入口，并恢复该工作区上次选择的页签。AI 页面以工作台内容嵌入：本地保存会话历史和用户可见的生成进度，但不展示服务提供商的内部推理原文。
+
+本节只记录当前实现。`2026-08-09` 和 `2026-08-11` 的历史规格保持原样；其被替代的条款已在上述 `2026-08-16` 设计文档中明确记录。
+
+## 8. 功能模块
+
+| 导航区域 | 页面 / 文件 | 当前能力 |
 | --- | --- | --- |
-| 首页 | `lib/features/home/home_page.dart` | 显示时钟、公历/农历、天气状态、天气动效、城市选择和刷新 |
-| 日历 | `lib/features/calendar/calendar_page.dart` | 月视图、节假日、分析事项、手动事项、校历事项、日期范围选择、周报提示词生成 |
-| 周分析 | `lib/features/analysis/analysis_page.dart` | 粘贴周记、拖拽或选择 TXT/MD/DOCX，规则分析事项和人物，确认后同步到历史、日历和人物 |
-| 人物关系 | `lib/features/persons/persons_page.dart` | 从历史分析记录生成关系图，查看关联事项，支持人物合并和改名 |
-| 历史 | `lib/features/history/history_page.dart` | 查看、编辑、删除周分析记录和校历导入记录 |
-| 校园地图 | `lib/features/campus_map/campus_map_page.dart` | 南望山/未来城地图背景，地点标记、搜索、筛选、收藏、访问热度、增删改 |
-| 阅读 | `lib/features/reading/reading_page.dart` | PDF 文献库、分类、拖拽导入、阅读器、搜索、缩略图、书签、高亮、下划线、删除线、波浪线、笔记、阅读时长记录 |
+| 全局入口 | 天气：`lib/features/home/home_page.dart`；AI：`lib/features/agent/agent_page.dart`；日历：`lib/features/calendar/calendar_page.dart` | 三个互斥的侧栏目的地；AI 以嵌入模式呈现，日历提供月视图、事项和周报提示词 |
+| 今日 | `lib/features/workbench/today_workspace.dart` | 一个整合页面，包含今日时间线、未完成待办、优先级控制、完成切换、快速记录和默认折叠的已完成事项 |
+| 科研 | `lib/features/workbench/research_workspace.dart` | 概览、文献、笔记、统计；不承载 AI、周分析或人物 |
+| 资料 | `lib/features/workbench/materials_workspace.dart` | 资料库和 PDF 工具；可按上下文渲染请求的文档而不暴露额外页签 |
+| 生活 | `lib/features/workbench/life_workspace.dart`；`campus_map`、`analysis`、`persons` 功能页 | 校园、周分析、人物三个页签 |
 | 设置 | `lib/features/settings/settings_page.dart` | 主题色、桌宠、数据目录、数据库备份、咨询包导出、主页图片、校历固定格式导入、周报提示词模板 |
 
-## 8. 核心数据模型
+## 9. 核心数据模型
 
 主要模型在 `lib/core/models/app_models.dart`：
 
@@ -173,7 +186,7 @@ main.dart
 - `PlaceCategory`：study / dining / dormitory / lab / sports / social / errands / other
 - `PdfAnnotationKind`：bookmark / highlight / underline / strikethrough / wavyUnderline / note
 
-## 9. 数据库和本地文件
+## 10. 数据库和本地文件
 
 数据库定义在 `lib/services/database/app_database.dart`，当前 `schemaVersion = 4`。
 
@@ -213,7 +226,7 @@ D:\桌面\研究生活\home_images
 - PDF 导入会复制到 `资料/<分类>`，数据库记录复制后的路径。
 - 数据迁移或对外咨询时不要直接发送真实 SQLite 文件，建议提供脱敏样例或 schema。
 
-## 10. 关键业务流程
+## 11. 关键业务流程
 
 ### 周分析流程
 
@@ -256,7 +269,7 @@ D:\桌面\研究生活\home_images
 3. `PetOverlay` 在应用内显示桌宠图集帧、气泡文字和动画状态。
 4. controller 可发送测试消息和当天任务提醒，退出时按设置隐藏桌宠状态。
 
-## 11. 测试覆盖
+## 12. 测试覆盖
 
 当前测试在 `test/`：
 
@@ -282,7 +295,7 @@ flutter test
 
 涉及 Drift schema 修改时，还需要重新生成 `app_database.g.dart` 并跑全量测试。
 
-## 12. 当前限制和风险点
+## 13. 当前限制和风险点
 
 - 平台强绑定 Windows，当前默认工作区路径硬编码为 `D:\桌面\研究生活`。
 - 没有后端、账号、云同步和多设备冲突处理。
@@ -294,7 +307,7 @@ flutter test
 - SQLite 中同时有结构化表和 `sessions.snapshotJson` 快照，改模型时需要注意兼容旧数据。
 - 应用目前没有插件化权限隔离；所有个人数据都在本机文件系统。
 
-## 13. 已有新功能选型线索
+## 14. 已有新功能选型线索
 
 已有文档：`docs/local_weekly_analysis_ollama.md`
 
@@ -308,7 +321,7 @@ flutter test
 
 这说明项目后续 AI 能力的优先方向是“本地 LLM 优先，规则兜底”，适合保护个人周记隐私。
 
-## 14. 适合向别人咨询的问题
+## 15. 适合向别人咨询的问题
 
 技术问题可以按下面方向问：
 
@@ -322,7 +335,7 @@ flutter test
 - 本地隐私数据如何备份、加密和脱敏？
 - UI 是否需要分离成更独立的 feature controller，减少页面对全局 controller 的依赖？
 
-## 15. 咨询时建议附上的文件
+## 16. 咨询时建议附上的文件
 
 如果咨询具体技术问题，建议附：
 
@@ -343,7 +356,7 @@ flutter test
 - `build/` 目录
 - 大体积图片、PDF、备份包或本地运行生成的桌宠资源，除非问题明确需要这些素材
 
-## 16. 可直接复制的咨询模板
+## 17. 可直接复制的咨询模板
 
 ```text
 我有一个 Flutter Windows 桌面应用，叫 Research Life，用于本地管理研究生日常记录、周分析、日历事项、人物关系、PDF 阅读、校园地图和内置桌宠陪伴。
