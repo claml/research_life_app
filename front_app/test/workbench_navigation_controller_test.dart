@@ -26,12 +26,13 @@ void main() {
 
   test('tabs are remembered independently for every workspace', () {
     final navigation = WorkbenchNavigationController();
-    navigation.selectTab(WorkbenchTab.todayTodos);
+    navigation.selectWorkspace(WorkbenchWorkspace.life);
+    navigation.selectTab(WorkbenchTab.lifePersons);
     navigation.selectWorkspace(WorkbenchWorkspace.materials);
     navigation.selectTab(WorkbenchTab.materialsPdfTools);
-    navigation.selectWorkspace(WorkbenchWorkspace.today);
+    navigation.selectWorkspace(WorkbenchWorkspace.life);
 
-    expect(navigation.activeTab, WorkbenchTab.todayTodos);
+    expect(navigation.activeTab, WorkbenchTab.lifePersons);
     navigation.selectWorkspace(WorkbenchWorkspace.materials);
     expect(navigation.activeTab, WorkbenchTab.materialsPdfTools);
   });
@@ -60,12 +61,68 @@ void main() {
       '概览',
       '文献',
       '笔记',
-      '周分析',
-      '人物',
       '统计',
     ]);
-    expect(WorkbenchWorkspace.life.tabs, [WorkbenchTab.lifeCampus]);
+    expect(WorkbenchWorkspace.today.tabs, [WorkbenchTab.todayOverview]);
+    expect(WorkbenchWorkspace.materials.tabs, [
+      WorkbenchTab.materialsFiles,
+      WorkbenchTab.materialsPdfTools,
+    ]);
+    expect(WorkbenchWorkspace.life.tabs.map((tab) => tab.label), [
+      '校园',
+      '周分析',
+      '人物',
+    ]);
   });
+
+  test('Calendar is a normal standalone destination', () {
+    final navigation = WorkbenchNavigationController();
+    navigation.openCalendar();
+
+    expect(navigation.calendarOpen, isTrue);
+    expect(navigation.weatherOpen, isFalse);
+
+    navigation.selectWorkspace(WorkbenchWorkspace.research);
+    expect(navigation.calendarOpen, isFalse);
+    expect(navigation.workspace, WorkbenchWorkspace.research);
+  });
+
+  test('AI assistant is a normal standalone destination', () {
+    final navigation = WorkbenchNavigationController();
+    navigation.openAi();
+
+    expect(navigation.aiOpen, isTrue);
+    expect(navigation.weatherOpen, isFalse);
+    expect(navigation.calendarOpen, isFalse);
+
+    navigation.selectWorkspace(WorkbenchWorkspace.materials);
+    expect(navigation.aiOpen, isFalse);
+    expect(navigation.workspace, WorkbenchWorkspace.materials);
+  });
+
+  test(
+    'standalone destinations are mutually exclusive and tabs close them',
+    () {
+      final navigation = WorkbenchNavigationController();
+      addTearDown(navigation.dispose);
+
+      navigation.openWeather();
+      expect(navigation.weatherOpen, isTrue);
+
+      navigation.openCalendar();
+      expect(navigation.weatherOpen, isFalse);
+      expect(navigation.calendarOpen, isTrue);
+
+      navigation.openAi();
+      expect(navigation.calendarOpen, isFalse);
+      expect(navigation.aiOpen, isTrue);
+
+      navigation.navigateToTab(WorkbenchTab.lifeAnalysis);
+      expect(navigation.aiOpen, isFalse);
+      expect(navigation.workspace, WorkbenchWorkspace.life);
+      expect(navigation.activeTab, WorkbenchTab.lifeAnalysis);
+    },
+  );
 
   test(
     'navigateToTab closes Weather and opens the requested workspace tab',

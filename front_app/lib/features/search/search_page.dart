@@ -16,9 +16,10 @@ const Map<SearchKind, String> _kindLabels = {
 };
 
 class SearchPage extends StatefulWidget {
-  const SearchPage({required this.onNavigate, super.key});
+  const SearchPage({required this.onNavigate, this.onOpenCalendar, super.key});
 
   final ValueChanged<WorkbenchTab> onNavigate;
+  final VoidCallback? onOpenCalendar;
 
   @override
   State<SearchPage> createState() => _SearchPageState();
@@ -49,11 +50,11 @@ class _SearchPageState extends State<SearchPage> {
           widget.onNavigate(WorkbenchTab.materialsDocumentView);
         }
       case SearchKind.event:
-        widget.onNavigate(WorkbenchTab.todayCalendar);
+        widget.onOpenCalendar?.call();
       case SearchKind.person:
-        widget.onNavigate(WorkbenchTab.researchPersons);
+        widget.onNavigate(WorkbenchTab.lifePersons);
       case SearchKind.session:
-        widget.onNavigate(WorkbenchTab.researchAnalysis);
+        widget.onNavigate(WorkbenchTab.lifeAnalysis);
       case SearchKind.place:
         widget.onNavigate(WorkbenchTab.lifeCampus);
     }

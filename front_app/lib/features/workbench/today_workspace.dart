@@ -7,8 +7,6 @@ import '../../app/workbench_destination.dart';
 import '../../app/workbench_navigation_controller.dart';
 import '../../core/models/app_models.dart';
 import '../../core/theme/app_tokens.dart';
-import '../calendar/calendar_page.dart';
-import '../todos/todo_page.dart';
 import 'workbench_workspace_frame.dart';
 
 class TodayWorkspace extends StatelessWidget {
@@ -27,33 +25,32 @@ class TodayWorkspace extends StatelessWidget {
   Widget build(BuildContext context) {
     final resolvedPages =
         pages ??
-        const {
-          WorkbenchTab.todayOverview: _TodayOverview(),
-          WorkbenchTab.todayCalendar: CalendarPage(),
-          WorkbenchTab.todayTodos: TodoPage(),
+        {
+          WorkbenchTab.todayOverview: _TodayOverview(
+            onQuickCapture: onQuickCapture,
+          ),
         };
     return WorkbenchWorkspaceFrame(
       key: const Key('today-workspace'),
       workspace: WorkbenchWorkspace.today,
       navigation: navigation,
       pages: resolvedPages,
-      primaryAction: FilledButton.icon(
-        onPressed: onQuickCapture,
-        icon: const Icon(Icons.add_rounded, size: 19),
-        label: const Text('快速记录'),
-      ),
     );
   }
 }
 
 class _TodayOverview extends StatefulWidget {
-  const _TodayOverview();
+  const _TodayOverview({this.onQuickCapture});
+
+  final VoidCallback? onQuickCapture;
 
   @override
   State<_TodayOverview> createState() => _TodayOverviewState();
 }
 
 class _TodayOverviewState extends State<_TodayOverview> {
+  bool _showCompleted = false;
+
   @override
   void initState() {
     super.initState();
@@ -83,7 +80,13 @@ class _TodayOverviewState extends State<_TodayOverview> {
                 )
                 .toList()
               ..sort((left, right) => left.startAt.compareTo(right.startAt));
-        final todos = controller.todayTodoEvents;
+        final todos = _sortedPending(controller.todayTodoEvents);
+        final todayIds = {for (final todo in todos) todo.id};
+        final upcoming = [
+          for (final todo in _sortedPending(controller.pendingTodoEvents))
+            if (!todayIds.contains(todo.id)) todo,
+        ];
+        final completed = controller.completedTodoEvents;
         return LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 760;
@@ -92,6 +95,11 @@ class _TodayOverviewState extends State<_TodayOverview> {
               title: '今日日程',
               trailing: '${events.length} 项',
               leadingIcon: Icons.schedule_rounded,
+              action: FilledButton.tonalIcon(
+                onPressed: widget.onQuickCapture,
+                icon: const Icon(Icons.add_rounded, size: 18),
+                label: const Text('快速记录'),
+              ),
               child: events.isEmpty
                   ? const _EmptyOverview(message: '今天还没有安排')
                   : Column(
@@ -104,17 +112,55 @@ class _TodayOverviewState extends State<_TodayOverview> {
             final todoPanel = _OverviewSection(
               key: const Key('today-todo-list'),
               title: '今日待办',
-              trailing: '${todos.length} 项',
+              trailing: '${todos.length + upcoming.length} 项未完成',
               leadingIcon: Icons.check_circle_outline_rounded,
-              child: todos.isEmpty
+              child: todos.isEmpty && upcoming.isEmpty && completed.isEmpty
                   ? const _EmptyOverview(message: '今天的任务已清空')
                   : Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
-                        for (final todo in todos.take(6))
-                          _TodoItem(
-                            event: todo,
-                            onToggle: () => controller.toggleTodoDone(todo.id),
+                        if (todos.isNotEmpty) ...[
+                          const _TodoGroupLabel(label: '今天'),
+                          for (final todo in todos)
+                            _TodoItem(
+                              event: todo,
+                              onToggle: () =>
+                                  controller.toggleTodoDone(todo.id),
+                              onPriorityChanged: (priority) =>
+                                  controller.setTodoPriority(todo.id, priority),
+                            ),
+                        ],
+                        if (upcoming.isNotEmpty) ...[
+                          const SizedBox(height: 18),
+                          const _TodoGroupLabel(label: '接下来'),
+                          for (final todo in upcoming)
+                            _TodoItem(
+                              event: todo,
+                              onToggle: () =>
+                                  controller.toggleTodoDone(todo.id),
+                              onPriorityChanged: (priority) =>
+                                  controller.setTodoPriority(todo.id, priority),
+                            ),
+                        ],
+                        if (completed.isNotEmpty) ...[
+                          const SizedBox(height: 18),
+                          _CompletedTodoHeader(
+                            count: completed.length,
+                            expanded: _showCompleted,
+                            onTap: () => setState(
+                              () => _showCompleted = !_showCompleted,
+                            ),
                           ),
+                          if (_showCompleted)
+                            for (final todo in completed)
+                              _TodoItem(
+                                event: todo,
+                                onToggle: () =>
+                                    controller.toggleTodoDone(todo.id),
+                                onPriorityChanged: (priority) => controller
+                                    .setTodoPriority(todo.id, priority),
+                              ),
+                        ],
                       ],
                     ),
             );
@@ -156,6 +202,22 @@ class _TodayOverviewState extends State<_TodayOverview> {
       },
     );
   }
+
+  List<EventItem> _sortedPending(List<EventItem> events) {
+    return [...events]..sort((left, right) {
+      final priority = _priorityRank(
+        right.priority,
+      ).compareTo(_priorityRank(left.priority));
+      return priority != 0 ? priority : left.startAt.compareTo(right.startAt);
+    });
+  }
+
+  int _priorityRank(TodoPriority priority) => switch (priority) {
+    TodoPriority.high => 3,
+    TodoPriority.medium => 2,
+    TodoPriority.low => 1,
+    TodoPriority.none => 0,
+  };
 }
 
 class _OverviewSection extends StatelessWidget {
@@ -164,6 +226,7 @@ class _OverviewSection extends StatelessWidget {
     required this.trailing,
     required this.leadingIcon,
     required this.child,
+    this.action,
     super.key,
   });
 
@@ -171,6 +234,7 @@ class _OverviewSection extends StatelessWidget {
   final String trailing;
   final IconData leadingIcon;
   final Widget child;
+  final Widget? action;
 
   @override
   Widget build(BuildContext context) {
@@ -198,6 +262,7 @@ class _OverviewSection extends StatelessWidget {
                   context,
                 ).textTheme.bodySmall?.copyWith(color: tokens.textMuted),
               ),
+              if (action != null) ...[const SizedBox(width: 12), action!],
             ],
           ),
           const SizedBox(height: 22),
@@ -287,59 +352,152 @@ class _TimelineItem extends StatelessWidget {
 }
 
 class _TodoItem extends StatelessWidget {
-  const _TodoItem({required this.event, required this.onToggle});
+  const _TodoItem({
+    required this.event,
+    required this.onToggle,
+    required this.onPriorityChanged,
+  });
 
   final EventItem event;
   final VoidCallback onToggle;
+  final ValueChanged<TodoPriority> onPriorityChanged;
+
+  Color _priorityColor(TodoPriority priority) => switch (priority) {
+    TodoPriority.high => const Color(0xFFE5484D),
+    TodoPriority.medium => const Color(0xFFF76B15),
+    TodoPriority.low => const Color(0xFF3E63DD),
+    TodoPriority.none => const Color(0xFF9AA4B2),
+  };
+
+  String _dateLabel() {
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final date = DateTime(
+      event.startAt.year,
+      event.startAt.month,
+      event.startAt.day,
+    );
+    final difference = date.difference(today).inDays;
+    if (difference == 0) return '今天';
+    if (difference == 1) return '明天';
+    return '${event.startAt.month}月${event.startAt.day}日';
+  }
 
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
-    final minute = event.startAt.minute.toString().padLeft(2, '0');
-    return InkWell(
-      onTap: onToggle,
-      borderRadius: BorderRadius.circular(tokens.radiusSmall),
-      hoverColor: tokens.accentSoft.withValues(alpha: 0.32),
-      child: Container(
-        padding: const EdgeInsets.symmetric(vertical: 14),
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: tokens.borderFaint)),
-        ),
-        child: Row(
-          children: [
-            Semantics(
-              button: true,
-              label: '完成 ${event.title}',
-              child: Icon(
-                Icons.check_box_outline_blank_rounded,
-                size: 21,
-                color: tokens.textMuted,
-              ),
+    final priorityColor = _priorityColor(event.priority);
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: tokens.borderFaint)),
+      ),
+      child: Row(
+        children: [
+          Checkbox(
+            value: event.isDone,
+            onChanged: (_) => onToggle(),
+            shape: const CircleBorder(),
+            visualDensity: VisualDensity.compact,
+          ),
+          Container(
+            width: 3,
+            height: 28,
+            decoration: BoxDecoration(
+              color: priorityColor,
+              borderRadius: BorderRadius.circular(99),
             ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                event.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: tokens.textPrimary,
-                  fontWeight: FontWeight.w500,
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  event.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                    color: event.isDone ? tokens.textMuted : tokens.textPrimary,
+                    fontWeight: FontWeight.w500,
+                    decoration: event.isDone
+                        ? TextDecoration.lineThrough
+                        : null,
+                  ),
                 ),
-              ),
+                const SizedBox(height: 3),
+                Text(
+                  '${_dateLabel()} · ${event.category.label}',
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodySmall?.copyWith(color: tokens.textMuted),
+                ),
+              ],
             ),
-            const SizedBox(width: 12),
-            Text(
-              '${event.startAt.hour.toString().padLeft(2, '0')}:$minute',
-              style: Theme.of(
-                context,
-              ).textTheme.bodySmall?.copyWith(color: tokens.textMuted),
-            ),
-          ],
-        ),
+          ),
+          PopupMenuButton<TodoPriority>(
+            tooltip: '设置优先级',
+            onSelected: onPriorityChanged,
+            itemBuilder: (context) => [
+              for (final priority in TodoPriority.values)
+                PopupMenuItem(
+                  value: priority,
+                  child: Text('优先级：${priority.label}'),
+                ),
+            ],
+            icon: Icon(Icons.flag_rounded, size: 18, color: priorityColor),
+          ),
+        ],
       ),
     );
   }
+}
+
+class _TodoGroupLabel extends StatelessWidget {
+  const _TodoGroupLabel({required this.label});
+
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Text(
+    label,
+    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+      color: context.tokens.textSecondary,
+      fontWeight: FontWeight.w600,
+    ),
+  );
+}
+
+class _CompletedTodoHeader extends StatelessWidget {
+  const _CompletedTodoHeader({
+    required this.count,
+    required this.expanded,
+    required this.onTap,
+  });
+
+  final int count;
+  final bool expanded;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) => InkWell(
+    onTap: onTap,
+    borderRadius: BorderRadius.circular(context.tokens.radiusSmall),
+    child: Padding(
+      padding: const EdgeInsets.symmetric(vertical: 8),
+      child: Row(
+        children: [
+          Icon(
+            expanded ? Icons.expand_more_rounded : Icons.chevron_right_rounded,
+            size: 19,
+            color: context.tokens.textSecondary,
+          ),
+          const SizedBox(width: 6),
+          Text('已完成 $count', style: Theme.of(context).textTheme.labelLarge),
+        ],
+      ),
+    ),
+  );
 }
 
 class _EmptyOverview extends StatelessWidget {

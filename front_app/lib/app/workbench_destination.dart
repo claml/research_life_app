@@ -4,18 +4,16 @@ enum WorkbenchWorkspace { today, research, materials, life, settings }
 
 enum WorkbenchTab {
   todayOverview,
-  todayCalendar,
-  todayTodos,
   researchOverview,
   researchReading,
   researchNotes,
-  researchAnalysis,
-  researchPersons,
   researchStats,
   materialsFiles,
   materialsDocumentView,
   materialsPdfTools,
   lifeCampus,
+  lifeAnalysis,
+  lifePersons,
   settingsOverview,
 }
 
@@ -73,25 +71,22 @@ const workbenchDestinations = <WorkbenchDestination>[
 
 extension WorkbenchWorkspaceMetadata on WorkbenchWorkspace {
   List<WorkbenchTab> get tabs => switch (this) {
-    WorkbenchWorkspace.today => const [
-      WorkbenchTab.todayOverview,
-      WorkbenchTab.todayCalendar,
-      WorkbenchTab.todayTodos,
-    ],
+    WorkbenchWorkspace.today => const [WorkbenchTab.todayOverview],
     WorkbenchWorkspace.research => const [
       WorkbenchTab.researchOverview,
       WorkbenchTab.researchReading,
       WorkbenchTab.researchNotes,
-      WorkbenchTab.researchAnalysis,
-      WorkbenchTab.researchPersons,
       WorkbenchTab.researchStats,
     ],
     WorkbenchWorkspace.materials => const [
       WorkbenchTab.materialsFiles,
-      WorkbenchTab.materialsDocumentView,
       WorkbenchTab.materialsPdfTools,
     ],
-    WorkbenchWorkspace.life => const [WorkbenchTab.lifeCampus],
+    WorkbenchWorkspace.life => const [
+      WorkbenchTab.lifeCampus,
+      WorkbenchTab.lifeAnalysis,
+      WorkbenchTab.lifePersons,
+    ],
     WorkbenchWorkspace.settings => const [WorkbenchTab.settingsOverview],
   };
 
@@ -100,36 +95,32 @@ extension WorkbenchWorkspaceMetadata on WorkbenchWorkspace {
 
 extension WorkbenchTabMetadata on WorkbenchTab {
   WorkbenchWorkspace get workspace => switch (this) {
-    WorkbenchTab.todayOverview ||
-    WorkbenchTab.todayCalendar ||
-    WorkbenchTab.todayTodos => WorkbenchWorkspace.today,
+    WorkbenchTab.todayOverview => WorkbenchWorkspace.today,
     WorkbenchTab.researchOverview ||
     WorkbenchTab.researchReading ||
     WorkbenchTab.researchNotes ||
-    WorkbenchTab.researchAnalysis ||
-    WorkbenchTab.researchPersons ||
     WorkbenchTab.researchStats => WorkbenchWorkspace.research,
     WorkbenchTab.materialsFiles ||
     WorkbenchTab.materialsDocumentView ||
     WorkbenchTab.materialsPdfTools => WorkbenchWorkspace.materials,
-    WorkbenchTab.lifeCampus => WorkbenchWorkspace.life,
+    WorkbenchTab.lifeCampus ||
+    WorkbenchTab.lifeAnalysis ||
+    WorkbenchTab.lifePersons => WorkbenchWorkspace.life,
     WorkbenchTab.settingsOverview => WorkbenchWorkspace.settings,
   };
 
   String get label => switch (this) {
     WorkbenchTab.todayOverview => '今天',
-    WorkbenchTab.todayCalendar => '日历',
-    WorkbenchTab.todayTodos => '待办',
     WorkbenchTab.researchOverview => '概览',
     WorkbenchTab.researchReading => '文献',
     WorkbenchTab.researchNotes => '笔记',
-    WorkbenchTab.researchAnalysis => '周分析',
-    WorkbenchTab.researchPersons => '人物',
     WorkbenchTab.researchStats => '统计',
     WorkbenchTab.materialsFiles => '文件',
     WorkbenchTab.materialsDocumentView => '文档查看',
     WorkbenchTab.materialsPdfTools => 'PDF 工具',
     WorkbenchTab.lifeCampus => '校园',
+    WorkbenchTab.lifeAnalysis => '周分析',
+    WorkbenchTab.lifePersons => '人物',
     WorkbenchTab.settingsOverview => '设置',
   };
 }

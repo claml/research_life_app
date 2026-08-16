@@ -53,8 +53,11 @@ void main() {
           builder: (context, setState) => WorkspaceTabs<WorkbenchTab>(
             items: const [
               WorkspaceTabItem(value: WorkbenchTab.todayOverview, label: '今天'),
-              WorkspaceTabItem(value: WorkbenchTab.todayCalendar, label: '日历'),
-              WorkspaceTabItem(value: WorkbenchTab.todayTodos, label: '待办'),
+              WorkspaceTabItem(value: WorkbenchTab.materialsFiles, label: '文件'),
+              WorkspaceTabItem(
+                value: WorkbenchTab.materialsPdfTools,
+                label: 'PDF 工具',
+              ),
             ],
             selected: selected,
             onSelected: (value) => setState(() => selected = value),
@@ -71,12 +74,14 @@ void main() {
     await tester.sendKeyEvent(LogicalKeyboardKey.arrowRight);
     await tester.pump();
 
-    expect(selected, WorkbenchTab.todayCalendar);
-    final calendarSemantics = tester.getSemantics(find.bySemanticsLabel('日历'));
-    expect(calendarSemantics.hasFlag(SemanticsFlag.isSelected), isTrue);
+    expect(selected, WorkbenchTab.materialsFiles);
+    final fileSemantics = tester.getSemantics(find.bySemanticsLabel('文件'));
+    expect(fileSemantics.hasFlag(SemanticsFlag.isSelected), isTrue);
     expect(
       tester
-          .widget<Focus>(find.byKey(const ValueKey(WorkbenchTab.todayCalendar)))
+          .widget<Focus>(
+            find.byKey(const ValueKey(WorkbenchTab.materialsFiles)),
+          )
           .focusNode!
           .hasFocus,
       isTrue,

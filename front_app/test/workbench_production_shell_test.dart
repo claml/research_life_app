@@ -4,6 +4,7 @@ import 'package:research_life/app/research_life_scope.dart';
 import 'package:research_life/app/workbench_destination.dart';
 import 'package:research_life/app/workbench_navigation_controller.dart';
 import 'package:research_life/app/workbench_shell.dart';
+import 'package:research_life/core/models/app_models.dart';
 import 'package:research_life/core/theme/app_theme.dart';
 import 'package:research_life/features/workbench/materials_workspace.dart';
 import 'package:research_life/features/workbench/today_workspace.dart';
@@ -38,6 +39,7 @@ void main() {
     expect(find.byKey(const Key('today-open-workspace')), findsOneWidget);
     expect(find.byKey(const Key('today-timeline')), findsOneWidget);
     expect(find.byKey(const Key('today-todo-list')), findsOneWidget);
+    expect(find.byKey(const Key('workspace-navigation-bar')), findsNothing);
 
     controller.requestOpenPdfTools();
     await tester.pump();
@@ -45,6 +47,38 @@ void main() {
     expect(find.byType(MaterialsWorkspace), findsOneWidget);
     final pdfTab = tester.widget<Semantics>(find.bySemanticsLabel('PDF 工具'));
     expect(pdfTab.properties.selected, isTrue);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Today integrates future todos and priority controls', (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(1280, 800);
+    addTearDown(tester.view.reset);
+    final controller = _createController();
+    addTearDown(controller.dispose);
+    controller.addManualEvent(
+      date: DateTime.now(),
+      title: '今日测试任务',
+      category: ItemCategory.work,
+      type: EventType.plan,
+    );
+
+    await tester.pumpWidget(
+      ResearchLifeScope(
+        controller: controller,
+        child: MaterialApp(
+          theme: AppTheme.light(),
+          home: const WorkbenchShell(),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.text('今日日程'), findsOneWidget);
+    expect(find.text('今日待办'), findsOneWidget);
+    expect(find.byTooltip('设置优先级'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

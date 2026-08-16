@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../core/theme/app_tokens.dart';
+import '../features/agent/agent_page.dart';
+import '../features/calendar/calendar_page.dart';
 import '../features/home/home_page.dart';
 import '../features/pet_overlay/pet_overlay.dart';
 import '../features/quick_capture/quick_capture_dialog.dart';
@@ -25,11 +27,15 @@ typedef WorkbenchWorkspaceBuilder =
       WorkbenchWorkspace workspace,
     );
 typedef WorkbenchWeatherBuilder = Widget Function(BuildContext context);
+typedef WorkbenchCalendarBuilder = Widget Function(BuildContext context);
+typedef WorkbenchAgentBuilder = Widget Function(BuildContext context);
 
 class WorkbenchShell extends StatefulWidget {
   const WorkbenchShell({
     this.workspaceBuilder,
     this.weatherBuilder,
+    this.calendarBuilder,
+    this.agentBuilder,
     this.navigationController,
     this.onSearchRequested,
     super.key,
@@ -38,6 +44,8 @@ class WorkbenchShell extends StatefulWidget {
   final WorkbenchNavigationController? navigationController;
   final WorkbenchWorkspaceBuilder? workspaceBuilder;
   final WorkbenchWeatherBuilder? weatherBuilder;
+  final WorkbenchCalendarBuilder? calendarBuilder;
+  final WorkbenchAgentBuilder? agentBuilder;
   final VoidCallback? onSearchRequested;
 
   @override
@@ -52,6 +60,8 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
   late WorkbenchNavigationController _navigation;
   late bool _ownsNavigation;
   final FocusNode _weatherEntryFocus = FocusNode(debugLabel: 'weather-entry');
+  final FocusNode _aiEntryFocus = FocusNode(debugLabel: 'ai-entry');
+  final FocusNode _calendarEntryFocus = FocusNode(debugLabel: 'calendar-entry');
   final Map<WorkbenchWorkspace, FocusNode> _workspaceFocus = {
     for (final workspace in WorkbenchWorkspace.values)
       workspace: FocusNode(debugLabel: 'workspace-${workspace.name}'),
@@ -61,7 +71,10 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
   bool _sidebarCollapsed = false;
 
   bool get _usesProductionContent =>
-      widget.workspaceBuilder == null && widget.weatherBuilder == null;
+      widget.workspaceBuilder == null &&
+      widget.weatherBuilder == null &&
+      widget.calendarBuilder == null &&
+      widget.agentBuilder == null;
 
   @override
   void initState() {
@@ -118,6 +131,8 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
       _navigation.dispose();
     }
     _weatherEntryFocus.dispose();
+    _aiEntryFocus.dispose();
+    _calendarEntryFocus.dispose();
     for (final node in _workspaceFocus.values) {
       node.dispose();
     }
@@ -173,6 +188,16 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
     _navigation.openWeather();
   }
 
+  void _openCalendar() {
+    _calendarEntryFocus.requestFocus();
+    _navigation.openCalendar();
+  }
+
+  void _openAi() {
+    _aiEntryFocus.requestFocus();
+    _navigation.openAi();
+  }
+
   @override
   Widget build(BuildContext context) {
     final tokens = context.tokens;
@@ -181,6 +206,8 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
     final workspaceBuilder =
         widget.workspaceBuilder ?? _buildProductionWorkspace;
     final weatherBuilder = widget.weatherBuilder ?? _buildProductionWeather;
+    final calendarBuilder = widget.calendarBuilder ?? _buildProductionCalendar;
+    final agentBuilder = widget.agentBuilder ?? _buildProductionAgent;
     final shell = AnimatedBuilder(
       animation: _navigation,
       builder: (context, _) => Scaffold(
@@ -218,8 +245,12 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                         reduceMotion: reduceMotion,
                         navigation: _navigation,
                         weatherFocusNode: _weatherEntryFocus,
+                        aiFocusNode: _aiEntryFocus,
+                        calendarFocusNode: _calendarEntryFocus,
                         workspaceFocusNodes: _workspaceFocus,
                         onWeatherSelected: _openWeather,
+                        onAiSelected: _openAi,
+                        onCalendarSelected: _openCalendar,
                         onWorkspaceSelected: _navigation.selectWorkspace,
                         onSearchRequested:
                             widget.onSearchRequested ??
@@ -250,6 +281,8 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
                                 navigation: _navigation,
                                 workspaceBuilder: workspaceBuilder,
                                 weatherBuilder: weatherBuilder,
+                                calendarBuilder: calendarBuilder,
+                                agentBuilder: agentBuilder,
                               ),
                             ),
                           ),
@@ -302,6 +335,10 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
   }
 
   Widget _buildProductionWeather(BuildContext context) => const HomePage();
+  Widget _buildProductionCalendar(BuildContext context) => const CalendarPage();
+
+  Widget _buildProductionAgent(BuildContext context) =>
+      const AgentPage(embedded: true);
 
   void _openQuickCapture() {
     final controller = _controller;
@@ -319,7 +356,8 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
       context: context,
       builder: (context) => TodayTodoDialog(
         controller: controller,
-        onOpenTodos: () => _navigation.navigateToTab(WorkbenchTab.todayTodos),
+        onOpenTodos: () =>
+            _navigation.navigateToTab(WorkbenchTab.todayOverview),
       ),
     );
   }
@@ -345,6 +383,10 @@ class _WorkbenchShellState extends State<WorkbenchShell> {
             ),
             Expanded(
               child: SearchPage(
+                onOpenCalendar: () {
+                  Navigator.of(dialogContext).pop();
+                  _openCalendar();
+                },
                 onNavigate: (tab) {
                   Navigator.of(dialogContext).pop();
                   _navigation.navigateToTab(tab);
@@ -366,8 +408,12 @@ class _WorkbenchSidebar extends StatelessWidget {
     required this.reduceMotion,
     required this.navigation,
     required this.weatherFocusNode,
+    required this.aiFocusNode,
+    required this.calendarFocusNode,
     required this.workspaceFocusNodes,
     required this.onWeatherSelected,
+    required this.onAiSelected,
+    required this.onCalendarSelected,
     required this.onWorkspaceSelected,
     required this.onSearchRequested,
     required this.onToggle,
@@ -379,8 +425,12 @@ class _WorkbenchSidebar extends StatelessWidget {
   final bool reduceMotion;
   final WorkbenchNavigationController navigation;
   final FocusNode weatherFocusNode;
+  final FocusNode aiFocusNode;
+  final FocusNode calendarFocusNode;
   final Map<WorkbenchWorkspace, FocusNode> workspaceFocusNodes;
   final VoidCallback onWeatherSelected;
+  final VoidCallback onAiSelected;
+  final VoidCallback onCalendarSelected;
   final ValueChanged<WorkbenchWorkspace> onWorkspaceSelected;
   final VoidCallback onSearchRequested;
   final VoidCallback onToggle;
@@ -445,6 +495,26 @@ class _WorkbenchSidebar extends StatelessWidget {
                       focusNode: weatherFocusNode,
                       onPressed: onWeatherSelected,
                     ),
+                    const SizedBox(height: 6),
+                    _SidebarNavButton(
+                      key: const Key('sidebar-ai-assistant'),
+                      collapsed: visuallyCollapsed,
+                      label: 'AI 助手',
+                      icon: Icons.auto_awesome_rounded,
+                      selected: navigation.aiOpen,
+                      focusNode: aiFocusNode,
+                      onPressed: onAiSelected,
+                    ),
+                    const SizedBox(height: 6),
+                    _SidebarNavButton(
+                      key: const Key('sidebar-calendar'),
+                      collapsed: visuallyCollapsed,
+                      label: '日历',
+                      icon: Icons.calendar_month_outlined,
+                      selected: navigation.calendarOpen,
+                      focusNode: calendarFocusNode,
+                      onPressed: onCalendarSelected,
+                    ),
                     const SizedBox(height: 8),
                     Divider(color: Colors.white.withValues(alpha: 0.12)),
                     const SizedBox(height: 6),
@@ -455,6 +525,8 @@ class _WorkbenchSidebar extends StatelessWidget {
                         collapsed: visuallyCollapsed,
                         selected:
                             !navigation.weatherOpen &&
+                            !navigation.calendarOpen &&
+                            !navigation.aiOpen &&
                             navigation.workspace == destination.workspace,
                         focusNode: workspaceFocusNodes[destination.workspace]!,
                         onPressed: () =>
@@ -469,6 +541,8 @@ class _WorkbenchSidebar extends StatelessWidget {
                       collapsed: visuallyCollapsed,
                       selected:
                           !navigation.weatherOpen &&
+                          !navigation.calendarOpen &&
+                          !navigation.aiOpen &&
                           navigation.workspace == settings.workspace,
                       focusNode: workspaceFocusNodes[settings.workspace]!,
                       onPressed: () => onWorkspaceSelected(settings.workspace),
@@ -514,6 +588,7 @@ class _SidebarBrand extends StatelessWidget {
             _SidebarUtilityButton(
               key: const Key('sidebar-toggle'),
               collapsed: true,
+              square: true,
               label: '展开导航',
               icon: Icons.keyboard_double_arrow_right_rounded,
               onPressed: onToggle,
@@ -524,13 +599,14 @@ class _SidebarBrand extends StatelessWidget {
       );
     }
     return SizedBox(
-      height: 42,
+      height: 48,
       child: Row(
         children: [
           Expanded(child: brand),
           _SidebarUtilityButton(
             key: const Key('sidebar-toggle'),
             collapsed: true,
+            square: true,
             label: '收起导航',
             icon: Icons.keyboard_double_arrow_left_rounded,
             onPressed: onToggle,
@@ -547,6 +623,7 @@ class _SidebarUtilityButton extends StatelessWidget {
     required this.label,
     required this.icon,
     required this.onPressed,
+    this.square = false,
     super.key,
   });
 
@@ -554,6 +631,7 @@ class _SidebarUtilityButton extends StatelessWidget {
   final String label;
   final IconData icon;
   final VoidCallback onPressed;
+  final bool square;
 
   @override
   Widget build(BuildContext context) {
@@ -563,16 +641,17 @@ class _SidebarUtilityButton extends StatelessWidget {
       child: ExcludeSemantics(
         child: InkWell(
           onTap: onPressed,
-          borderRadius: BorderRadius.circular(999),
+          borderRadius: BorderRadius.circular(square ? 14 : 999),
           hoverColor: Colors.white.withValues(alpha: 0.06),
           highlightColor: Colors.transparent,
           splashColor: Colors.white.withValues(alpha: 0.1),
           child: Container(
-            height: 42,
+            width: square ? 48 : null,
+            height: square ? 48 : 42,
             padding: EdgeInsets.symmetric(horizontal: collapsed ? 0 : 14),
             decoration: BoxDecoration(
               color: Colors.white.withValues(alpha: 0.075),
-              borderRadius: BorderRadius.circular(999),
+              borderRadius: BorderRadius.circular(square ? 14 : 999),
               border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
             ),
             child: Row(
@@ -611,6 +690,7 @@ class _SidebarNavButton extends StatelessWidget {
     required this.selected,
     required this.focusNode,
     required this.onPressed,
+    super.key,
   });
 
   final String label;
@@ -715,11 +795,15 @@ class _WorkbenchContent extends StatefulWidget {
     required this.navigation,
     required this.workspaceBuilder,
     required this.weatherBuilder,
+    required this.calendarBuilder,
+    required this.agentBuilder,
   });
 
   final WorkbenchNavigationController navigation;
   final WorkbenchWorkspaceBuilder workspaceBuilder;
   final WorkbenchWeatherBuilder weatherBuilder;
+  final WorkbenchCalendarBuilder calendarBuilder;
+  final WorkbenchAgentBuilder agentBuilder;
 
   @override
   State<_WorkbenchContent> createState() => _WorkbenchContentState();
@@ -728,11 +812,15 @@ class _WorkbenchContent extends StatefulWidget {
 class _WorkbenchContentState extends State<_WorkbenchContent> {
   final Set<WorkbenchWorkspace> _visited = {WorkbenchWorkspace.today};
   bool _weatherVisited = false;
+  bool _calendarVisited = false;
+  bool _aiVisited = false;
 
   @override
   Widget build(BuildContext context) {
     _visited.add(widget.navigation.workspace);
     _weatherVisited = _weatherVisited || widget.navigation.weatherOpen;
+    _calendarVisited = _calendarVisited || widget.navigation.calendarOpen;
+    _aiVisited = _aiVisited || widget.navigation.aiOpen;
     return Stack(
       fit: StackFit.expand,
       children: [
@@ -743,14 +831,20 @@ class _WorkbenchContentState extends State<_WorkbenchContent> {
               child: TickerMode(
                 enabled:
                     !widget.navigation.weatherOpen &&
+                    !widget.navigation.calendarOpen &&
+                    !widget.navigation.aiOpen &&
                     widget.navigation.workspace == workspace,
                 child: IgnorePointer(
                   ignoring:
                       widget.navigation.weatherOpen ||
+                      widget.navigation.calendarOpen ||
+                      widget.navigation.aiOpen ||
                       widget.navigation.workspace != workspace,
                   child: Offstage(
                     offstage:
                         widget.navigation.weatherOpen ||
+                        widget.navigation.calendarOpen ||
+                        widget.navigation.aiOpen ||
                         widget.navigation.workspace != workspace,
                     child: widget.workspaceBuilder(
                       context,
@@ -771,6 +865,34 @@ class _WorkbenchContentState extends State<_WorkbenchContent> {
                 child: Offstage(
                   offstage: !widget.navigation.weatherOpen,
                   child: widget.weatherBuilder(context),
+                ),
+              ),
+            ),
+          ),
+        if (_calendarVisited)
+          Positioned.fill(
+            key: const ValueKey('calendar-content'),
+            child: TickerMode(
+              enabled: widget.navigation.calendarOpen,
+              child: IgnorePointer(
+                ignoring: !widget.navigation.calendarOpen,
+                child: Offstage(
+                  offstage: !widget.navigation.calendarOpen,
+                  child: widget.calendarBuilder(context),
+                ),
+              ),
+            ),
+          ),
+        if (_aiVisited)
+          Positioned.fill(
+            key: const ValueKey('agent-content'),
+            child: TickerMode(
+              enabled: widget.navigation.aiOpen,
+              child: IgnorePointer(
+                ignoring: !widget.navigation.aiOpen,
+                child: Offstage(
+                  offstage: !widget.navigation.aiOpen,
+                  child: widget.agentBuilder(context),
                 ),
               ),
             ),

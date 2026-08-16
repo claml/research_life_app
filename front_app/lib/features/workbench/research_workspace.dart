@@ -6,25 +6,16 @@ import '../../app/research_life_scope.dart';
 import '../../app/workbench_destination.dart';
 import '../../app/workbench_navigation_controller.dart';
 import '../../core/theme/app_tokens.dart';
-import '../agent/agent_page.dart';
-import '../analysis/analysis_page.dart';
 import '../notes/my_notes_page.dart';
-import '../persons/persons_page.dart';
 import '../reading/reading_page.dart';
 import '../stats/stats_page.dart';
 import 'workbench_workspace_frame.dart';
 
 class ResearchWorkspace extends StatelessWidget {
-  const ResearchWorkspace({
-    required this.navigation,
-    this.pages,
-    this.onOpenAi,
-    super.key,
-  });
+  const ResearchWorkspace({required this.navigation, this.pages, super.key});
 
   final WorkbenchNavigationController navigation;
   final Map<WorkbenchTab, Widget>? pages;
-  final VoidCallback? onOpenAi;
 
   @override
   Widget build(BuildContext context) {
@@ -36,8 +27,6 @@ class ResearchWorkspace extends StatelessWidget {
           ),
           WorkbenchTab.researchReading: const ReadingPage(),
           WorkbenchTab.researchNotes: const MyNotesPage(),
-          WorkbenchTab.researchAnalysis: const AnalysisPage(),
-          WorkbenchTab.researchPersons: const PersonsPage(),
           WorkbenchTab.researchStats: const StatsPage(),
         };
     return WorkbenchWorkspaceFrame(
@@ -45,19 +34,6 @@ class ResearchWorkspace extends StatelessWidget {
       workspace: WorkbenchWorkspace.research,
       navigation: navigation,
       pages: resolvedPages,
-      primaryAction: FilledButton.icon(
-        onPressed: onOpenAi ?? () => _showAgent(context),
-        icon: const Icon(Icons.auto_awesome_rounded, size: 18),
-        label: const Text('AI 助手'),
-      ),
-    );
-  }
-
-  void _showAgent(BuildContext context) {
-    showDialog<void>(
-      context: context,
-      useSafeArea: false,
-      builder: (context) => const Dialog.fullscreen(child: AgentPage()),
     );
   }
 }
@@ -127,8 +103,8 @@ class _ResearchOverviewState extends State<_ResearchOverview> {
                               ? '已保存分析结果'
                               : latest.preview.summary,
                         ],
-                  onOpen: () => widget.navigation.selectTab(
-                    WorkbenchTab.researchAnalysis,
+                  onOpen: () => widget.navigation.navigateToTab(
+                    WorkbenchTab.lifeAnalysis,
                   ),
                 ),
               ];

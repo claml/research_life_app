@@ -95,15 +95,16 @@ void main() {
       'lib/state/research_life_controller.dart',
     ).readAsStringSync();
     final runtime = File('lib/app/local_app_runtime.dart').readAsStringSync();
-    final researchWorkspace = File(
-      'lib/features/workbench/research_workspace.dart',
+    final workbenchShell = File(
+      'lib/app/workbench_shell.dart',
     ).readAsStringSync();
 
     expect(agent, isNot(contains('ResearchLifeController')));
     expect(agent, isNot(contains('/api/v1/agent')));
     expect(agent, contains("Key('agent-settings')"));
     expect(agent, contains("Key('agent-api-key')"));
-    expect(researchWorkspace, contains('AgentPage'));
+    expect(workbenchShell, contains('AgentPage'));
+    expect(workbenchShell, contains("label: 'AI 助手'"));
     expect(settings, contains('LocalBackupPanel'));
     for (final forbiddenSource in [
       'AuthScope',

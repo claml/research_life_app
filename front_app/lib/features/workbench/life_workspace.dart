@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 
 import '../../app/workbench_destination.dart';
 import '../../app/workbench_navigation_controller.dart';
+import '../analysis/analysis_page.dart';
 import '../campus_map/campus_map_page.dart';
+import '../persons/persons_page.dart';
 import 'workbench_workspace_frame.dart';
 
 class LifeWorkspace extends StatelessWidget {
@@ -17,7 +19,13 @@ class LifeWorkspace extends StatelessWidget {
       key: const Key('life-workspace'),
       workspace: WorkbenchWorkspace.life,
       navigation: navigation,
-      pages: pages ?? const {WorkbenchTab.lifeCampus: CampusMapPage()},
+      pages:
+          pages ??
+          const {
+            WorkbenchTab.lifeCampus: CampusMapPage(),
+            WorkbenchTab.lifeAnalysis: AnalysisPage(),
+            WorkbenchTab.lifePersons: PersonsPage(),
+          },
     );
   }
 }

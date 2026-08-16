@@ -17,7 +17,9 @@ import 'package:research_life/services/storage/local_workspace_service.dart';
 import 'package:research_life/state/research_life_controller.dart';
 
 void main() {
-  testWidgets('AI action exists only in Research', (tester) async {
+  testWidgets('Research header contains only workspace navigation', (
+    tester,
+  ) async {
     final controller = _createController();
     final researchNavigation = WorkbenchNavigationController(
       initialWorkspace: WorkbenchWorkspace.research,
@@ -31,7 +33,8 @@ void main() {
         ),
       ),
     );
-    expect(find.text('AI 助手'), findsOneWidget);
+    expect(find.text('AI 助手'), findsNothing);
+    expect(find.byKey(const Key('workspace-navigation-bar')), findsOneWidget);
 
     final materialsNavigation = WorkbenchNavigationController(
       initialWorkspace: WorkbenchWorkspace.materials,
@@ -52,7 +55,7 @@ void main() {
     materialsNavigation.dispose();
   });
 
-  testWidgets('Materials keeps file state while visiting another tab', (
+  testWidgets('Materials keeps file state while visiting PDF tools', (
     tester,
   ) async {
     final controller = _createController();
@@ -72,7 +75,7 @@ void main() {
     await tester.pump();
     expect(find.text('已选择 1'), findsOneWidget);
 
-    await tester.tap(find.text('文档查看'));
+    await tester.tap(find.text('PDF 工具'));
     await tester.pump();
     await tester.tap(find.text('文件'));
     await tester.pump();
@@ -90,7 +93,6 @@ void main() {
         controller,
         TodayWorkspace(
           navigation: navigation,
-          pages: _pagesFor(WorkbenchWorkspace.today),
           onQuickCapture: () => requests += 1,
         ),
       ),
@@ -98,16 +100,15 @@ void main() {
 
     expect(find.text('快速记录'), findsOneWidget);
     expect(find.byKey(const Key('page-header')), findsNothing);
-    expect(
-      tester.getSize(find.byKey(const Key('workspace-navigation-bar'))).height,
-      lessThanOrEqualTo(52),
-    );
+    expect(find.byKey(const Key('workspace-navigation-bar')), findsNothing);
     await tester.tap(find.text('快速记录'));
     expect(requests, 1);
     navigation.dispose();
   });
 
-  testWidgets('single-page Life starts directly with content', (tester) async {
+  testWidgets('Life owns Campus, weekly analysis, and Persons tabs', (
+    tester,
+  ) async {
     final controller = _createController();
     final navigation = WorkbenchNavigationController(
       initialWorkspace: WorkbenchWorkspace.life,
@@ -117,15 +118,21 @@ void main() {
         controller,
         LifeWorkspace(
           navigation: navigation,
-          pages: const {WorkbenchTab.lifeCampus: Center(child: Text('校园内容'))},
+          pages: const {
+            WorkbenchTab.lifeCampus: Center(child: Text('校园内容')),
+            WorkbenchTab.lifeAnalysis: Center(child: Text('周分析内容')),
+            WorkbenchTab.lifePersons: Center(child: Text('人物内容')),
+          },
         ),
       ),
     );
 
     expect(find.text('生活'), findsNothing);
     expect(find.text('校园地点与常用信息。'), findsNothing);
-    expect(find.byKey(const Key('workspace-navigation-bar')), findsNothing);
+    expect(find.byKey(const Key('workspace-navigation-bar')), findsOneWidget);
     expect(find.text('校园内容'), findsOneWidget);
+    expect(find.text('周分析'), findsOneWidget);
+    expect(find.text('人物'), findsOneWidget);
     navigation.dispose();
   });
 }
