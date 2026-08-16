@@ -178,6 +178,119 @@ void main() {
   });
 
   test(
+    'fresh bootstrap restores failed user ownership and retry reuses it',
+    () async {
+      await fixture.storeConfiguration();
+      final session = await fixture.chats.createSession(
+        profileId: remoteProfile.id,
+        model: remoteProfile.model,
+        title: 'Interrupted history',
+      );
+      final pendingUser = await fixture.chats.appendMessage(
+        sessionId: session.id,
+        role: 'user',
+        content: 'Retry after restart',
+        reasoningContent: const AgentThinkingTrace(
+          status: AgentThinkingStatus.failed,
+          steps: ['已保存用户消息', '请求 AI 服务失败'],
+        ).encode(),
+      );
+
+      await fixture.controller.bootstrap();
+
+      expect(fixture.controller.canRetry, isTrue);
+      fixture.adapter.replyNext('must not be used');
+      await fixture.controller.sendMessage('Do not append another user');
+      expect(fixture.adapter.calls, 0);
+      expect(await fixture.chats.listMessages(session.id), hasLength(1));
+
+      fixture.adapter.replyNext('Recovered after restart');
+      await fixture.controller.retryFailedMessage();
+
+      final stored = await fixture.chats.listMessages(session.id);
+      expect(stored.map((message) => message.role), ['user', 'assistant']);
+      expect(
+        stored.where((message) => message.isUser).single.id,
+        pendingUser.id,
+      );
+      expect(fixture.adapter.calls, 1);
+      expect(fixture.controller.canRetry, isFalse);
+    },
+  );
+
+  test('openSession restores stopped user ownership', () async {
+    await fixture.storeConfiguration();
+    final pending = await fixture.chats.createSession(
+      profileId: remoteProfile.id,
+      model: remoteProfile.model,
+      title: 'Stopped history',
+    );
+    await fixture.chats.appendMessage(
+      sessionId: pending.id,
+      role: 'user',
+      content: 'Stopped before restart',
+      reasoningContent: const AgentThinkingTrace(
+        status: AgentThinkingStatus.stopped,
+        steps: ['已保存用户消息', '请求已停止'],
+      ).encode(),
+    );
+    final answered = await fixture.chats.createSession(
+      profileId: remoteProfile.id,
+      model: remoteProfile.model,
+      title: 'Answered history',
+    );
+    await fixture.chats.appendMessage(
+      sessionId: answered.id,
+      role: 'user',
+      content: 'Answered question',
+    );
+    await fixture.chats.appendMessage(
+      sessionId: answered.id,
+      role: 'assistant',
+      content: 'Answered response',
+    );
+    await fixture.controller.bootstrap();
+    expect(fixture.controller.currentSessionId, answered.id);
+
+    await fixture.controller.openSession(pending.id);
+
+    expect(fixture.controller.canRetry, isTrue);
+  });
+
+  test('fresh bootstrap normalizes orphaned active trace to stopped', () async {
+    await fixture.storeConfiguration();
+    final session = await fixture.chats.createSession(
+      profileId: remoteProfile.id,
+      model: remoteProfile.model,
+      title: 'Orphaned active history',
+    );
+    await fixture.chats.appendMessage(
+      sessionId: session.id,
+      role: 'user',
+      content: 'Interrupted by restart',
+      reasoningContent: const AgentThinkingTrace(
+        status: AgentThinkingStatus.active,
+        steps: ['已保存用户消息', '正在生成回复'],
+      ).encode(),
+    );
+
+    await fixture.controller.bootstrap();
+
+    expect(fixture.controller.canRetry, isTrue);
+    expect(
+      AgentThinkingTrace.tryDecode(
+        fixture.controller.messages.single.reasoningContent,
+      )?.status,
+      AgentThinkingStatus.stopped,
+    );
+    final stored = await fixture.chats.listMessages(session.id);
+    expect(
+      AgentThinkingTrace.tryDecode(stored.single.reasoningContent)?.status,
+      AgentThinkingStatus.stopped,
+    );
+  });
+
+  test(
     'cancelling a retry after its assistant persists stops its trace',
     () async {
       await fixture.storeConfiguration();

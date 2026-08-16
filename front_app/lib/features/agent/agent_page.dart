@@ -54,6 +54,27 @@ class _AgentPageState extends State<AgentPage> {
     );
   }
 
+  void _showCompactHistory() {
+    final controller = _controller;
+    if (controller == null) return;
+    showModalBottomSheet<void>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (sheetContext) => _CompactHistorySheet(
+        controller: controller,
+        onNewSession: () async {
+          await controller.startNewSession();
+          if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+        },
+        onOpenSession: (sessionId) async {
+          await controller.openSession(sessionId);
+          if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+        },
+      ),
+    );
+  }
+
   Future<void> _send() async {
     final controller = _controller;
     if (controller == null) return;
@@ -86,6 +107,7 @@ class _AgentPageState extends State<AgentPage> {
       sidebarCollapsed: _sidebarCollapsed,
       onCollapseSidebar: () => setState(() => _sidebarCollapsed = true),
       onExpandSidebar: () => setState(() => _sidebarCollapsed = false),
+      onOpenCompactHistory: _showCompactHistory,
       onOpenSettings: _showSettings,
       onSend: _send,
       embedded: widget.embedded,
@@ -101,6 +123,7 @@ class _AgentWorkspace extends StatelessWidget {
     required this.sidebarCollapsed,
     required this.onCollapseSidebar,
     required this.onExpandSidebar,
+    required this.onOpenCompactHistory,
     required this.onOpenSettings,
     required this.onSend,
     required this.embedded,
@@ -112,6 +135,7 @@ class _AgentWorkspace extends StatelessWidget {
   final bool sidebarCollapsed;
   final VoidCallback onCollapseSidebar;
   final VoidCallback onExpandSidebar;
+  final VoidCallback onOpenCompactHistory;
   final VoidCallback onOpenSettings;
   final VoidCallback onSend;
   final bool embedded;
@@ -140,7 +164,7 @@ class _AgentWorkspace extends StatelessWidget {
                       controller: controller,
                       collapsed: narrow || sidebarCollapsed,
                       onCollapse: onCollapseSidebar,
-                      onExpand: narrow ? null : onExpandSidebar,
+                      onExpand: narrow ? onOpenCompactHistory : onExpandSidebar,
                     ),
                     Expanded(
                       child: Column(
@@ -494,6 +518,88 @@ class _HistoryTile extends StatelessWidget {
   }
 }
 
+class _CompactHistorySheet extends StatelessWidget {
+  const _CompactHistorySheet({
+    required this.controller,
+    required this.onNewSession,
+    required this.onOpenSession,
+  });
+
+  final AgentController controller;
+  final Future<void> Function() onNewSession;
+  final Future<void> Function(int sessionId) onOpenSession;
+
+  @override
+  Widget build(BuildContext context) {
+    final tokens = context.tokens;
+    return FractionallySizedBox(
+      key: const Key('agent-compact-history'),
+      heightFactor: 0.78,
+      child: Material(
+        color: tokens.sidebarSurface,
+        child: AnimatedBuilder(
+          animation: controller,
+          builder: (context, _) => Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        '本地历史',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: '关闭历史记录',
+                      onPressed: () => Navigator.of(context).pop(),
+                      color: Colors.white70,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                child: FilledButton.icon(
+                  key: const Key('agent-new-session'),
+                  onPressed: controller.isBusy
+                      ? null
+                      : () => unawaited(onNewSession()),
+                  icon: const Icon(Icons.add_rounded, size: 18),
+                  label: const Text('新对话'),
+                ),
+              ),
+              const SizedBox(height: 10),
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(8, 0, 8, 12),
+                  itemCount: controller.sessions.length,
+                  itemBuilder: (context, index) {
+                    final session = controller.sessions[index];
+                    return _HistoryTile(
+                      session: session,
+                      selected: controller.currentSessionId == session.id,
+                      onOpen: () => unawaited(onOpenSession(session.id)),
+                      onDelete: () => controller.deleteSession(session.id),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ConversationSurface extends StatelessWidget {
   const _ConversationSurface({
     required this.controller,
@@ -618,6 +724,7 @@ class _MessageList extends StatelessWidget {
             ? AgentThinkingTrace.tryDecode(message.reasoningContent)
             : null;
         return Column(
+          key: ValueKey('agent-message-${message.id}'),
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             _MessageBubble(message: message),

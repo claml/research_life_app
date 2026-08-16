@@ -101,6 +101,9 @@ class AgentController extends ChangeNotifier {
       final loadedMessages = firstSession == null
           ? const <AgentChatMessage>[]
           : await _chats.listMessages(firstSession.id);
+      final recovered = firstSession == null
+          ? (messages: loadedMessages, pendingUserMessageId: null)
+          : await _recoverLoadedMessages(firstSession.id, loadedMessages);
       if (_disposed || generation != _messageLoadGeneration) return;
 
       profile = loadedProfile;
@@ -111,7 +114,12 @@ class AgentController extends ChangeNotifier {
       currentSessionId = firstSession?.id;
       messages
         ..clear()
-        ..addAll(loadedMessages);
+        ..addAll(recovered.messages);
+      _failedUserMessageIds.clear();
+      final pendingUserMessageId = recovered.pendingUserMessageId;
+      if (firstSession != null && pendingUserMessageId != null) {
+        _failedUserMessageIds[firstSession.id] = pendingUserMessageId;
+      }
       _clearTransientMessageState();
     } on Object {
       if (!_disposed && generation == _messageLoadGeneration) {
@@ -273,6 +281,7 @@ class AgentController extends ChangeNotifier {
     _notify();
     try {
       final loaded = await _chats.listMessages(sessionId);
+      final recovered = await _recoverLoadedMessages(sessionId, loaded);
       if (_disposed ||
           generation != _messageLoadGeneration ||
           currentSessionId != sessionId) {
@@ -280,7 +289,12 @@ class AgentController extends ChangeNotifier {
       }
       messages
         ..clear()
-        ..addAll(loaded);
+        ..addAll(recovered.messages);
+      _failedUserMessageIds.remove(sessionId);
+      final pendingUserMessageId = recovered.pendingUserMessageId;
+      if (pendingUserMessageId != null) {
+        _failedUserMessageIds[sessionId] = pendingUserMessageId;
+      }
     } on Object {
       if (!_disposed &&
           generation == _messageLoadGeneration &&
@@ -654,6 +668,47 @@ class AgentController extends ChangeNotifier {
     return AgentThinkingTrace(
       status: status,
       steps: [_thinkingSaved, _thinkingContext, trailingStep],
+    );
+  }
+
+  Future<({List<AgentChatMessage> messages, int? pendingUserMessageId})>
+  _recoverLoadedMessages(int sessionId, List<AgentChatMessage> loaded) async {
+    if (loaded.isEmpty || !loaded.last.isUser) {
+      return (messages: loaded, pendingUserMessageId: null);
+    }
+    final pendingUser = loaded.last;
+    final trace = AgentThinkingTrace.tryDecode(pendingUser.reasoningContent);
+    if (trace == null || trace.status == AgentThinkingStatus.completed) {
+      return (messages: loaded, pendingUserMessageId: null);
+    }
+    if (trace.status != AgentThinkingStatus.active) {
+      return (messages: loaded, pendingUserMessageId: pendingUser.id);
+    }
+
+    final stoppedTrace = _terminalThinkingTrace(
+      AgentThinkingStatus.stopped,
+      _thinkingStopped,
+    );
+    AgentChatMessage normalized;
+    try {
+      normalized = await _chats.updateMessageReasoningContent(
+        messageId: pendingUser.id,
+        reasoningContent: stoppedTrace.encode(),
+      );
+    } on Object {
+      normalized = AgentChatMessage(
+        id: pendingUser.id,
+        sessionId: sessionId,
+        role: pendingUser.role,
+        content: pendingUser.content,
+        reasoningContent: stoppedTrace.encode(),
+        model: pendingUser.model,
+        createdAt: pendingUser.createdAt,
+      );
+    }
+    return (
+      messages: [...loaded.take(loaded.length - 1), normalized],
+      pendingUserMessageId: pendingUser.id,
     );
   }
 

@@ -115,7 +115,7 @@ extension WorkbenchTabMetadata on WorkbenchTab {
     WorkbenchTab.researchReading => '文献',
     WorkbenchTab.researchNotes => '笔记',
     WorkbenchTab.researchStats => '统计',
-    WorkbenchTab.materialsFiles => '文件',
+    WorkbenchTab.materialsFiles => '资料库',
     WorkbenchTab.materialsDocumentView => '文档查看',
     WorkbenchTab.materialsPdfTools => 'PDF 工具',
     WorkbenchTab.lifeCampus => '校园',

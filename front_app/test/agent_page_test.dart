@@ -411,6 +411,46 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('500px compact history switches, deletes, and starts sessions', (
+    tester,
+  ) async {
+    final fixture = _AgentPageFixture(configured: true)
+      ..seedSession(title: '窄屏第一段', user: '窄屏第一问')
+      ..seedSession(title: '窄屏第二段', user: '窄屏第二问');
+    await fixture.pump(tester, size: const Size(500, 700));
+
+    expect(
+      tester.getSize(find.byKey(const Key('agent-history-sidebar'))).width,
+      60,
+    );
+    await tester.tap(find.byKey(const Key('agent-expand-history')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-compact-history')), findsOneWidget);
+
+    final secondId = fixture.chats.sessions[1].id;
+    await tester.tap(find.byKey(ValueKey('agent-history-$secondId')));
+    await tester.pumpAndSettle();
+    expect(find.text('窄屏第二问'), findsOneWidget);
+    expect(
+      tester.getSize(find.byKey(const Key('agent-history-sidebar'))).width,
+      60,
+    );
+
+    await tester.tap(find.byKey(const Key('agent-expand-history')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(ValueKey('agent-delete-session-$secondId')));
+    await tester.pumpAndSettle();
+    expect(
+      fixture.chats.sessions.map((session) => session.id),
+      isNot(contains(secondId)),
+    );
+
+    await tester.tap(find.byKey(const Key('agent-new-session')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('agent-compact-history')), findsNothing);
+    expect(find.text('从一个研究问题开始'), findsOneWidget);
+  });
+
   testWidgets('Agent chrome uses coordinated dark-rail controls and top bar', (
     tester,
   ) async {

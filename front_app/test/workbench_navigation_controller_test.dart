@@ -68,6 +68,10 @@ void main() {
       WorkbenchTab.materialsFiles,
       WorkbenchTab.materialsPdfTools,
     ]);
+    expect(WorkbenchWorkspace.materials.tabs.map((tab) => tab.label), [
+      '资料库',
+      'PDF 工具',
+    ]);
     expect(WorkbenchWorkspace.life.tabs.map((tab) => tab.label), [
       '校园',
       '周分析',

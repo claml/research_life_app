@@ -77,7 +77,7 @@ void main() {
 
     await tester.tap(find.text('PDF 工具'));
     await tester.pump();
-    await tester.tap(find.text('文件'));
+    await tester.tap(find.text('资料库'));
     await tester.pump();
 
     expect(find.text('已选择 1'), findsOneWidget);
@@ -106,7 +106,7 @@ void main() {
       await tester.pump();
 
       expect(find.text('请求的文档内容'), findsOneWidget);
-      expect(find.text('文件'), findsOneWidget);
+      expect(find.text('资料库'), findsOneWidget);
       expect(find.text('PDF 工具'), findsOneWidget);
       expect(find.text('文档查看'), findsNothing);
       navigation.dispose();

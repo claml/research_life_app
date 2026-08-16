@@ -170,9 +170,47 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('life:lifeCampus'), findsOneWidget);
   });
+
+  testWidgets('AI and Calendar retain state after navigating away and back', (
+    tester,
+  ) async {
+    await _setSurface(tester, const Size(1280, 800));
+    await tester.pumpWidget(
+      _testShell(
+        agentBuilder: (_) => const _StateSentinel(name: 'ai'),
+        calendarBuilder: (_) => const _StateSentinel(name: 'calendar'),
+      ),
+    );
+
+    await tester.tap(find.bySemanticsLabel('AI 助手'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('ai-increment')));
+    await tester.pump();
+    expect(find.text('ai:1'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('今天'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('AI 助手'));
+    await tester.pumpAndSettle();
+    expect(find.text('ai:1'), findsOneWidget);
+
+    await tester.tap(find.bySemanticsLabel('日历'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('calendar-increment')));
+    await tester.pump();
+    expect(find.text('calendar:1'), findsOneWidget);
+    await tester.tap(find.bySemanticsLabel('科研'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.bySemanticsLabel('日历'));
+    await tester.pumpAndSettle();
+    expect(find.text('calendar:1'), findsOneWidget);
+  });
 }
 
-Widget _testShell({WorkbenchNavigationController? navigation}) {
+Widget _testShell({
+  WorkbenchNavigationController? navigation,
+  WorkbenchAgentBuilder? agentBuilder,
+  WorkbenchCalendarBuilder? calendarBuilder,
+}) {
   return MaterialApp(
     theme: AppTheme.light(),
     home: WorkbenchShell(
@@ -181,10 +219,36 @@ Widget _testShell({WorkbenchNavigationController? navigation}) {
           Center(child: Text('${workspace.name}:${controller.activeTab.name}')),
       weatherBuilder: (context) =>
           const Center(child: Text('天气', key: Key('weather-view'))),
-      calendarBuilder: (context) =>
-          const Center(child: Text('日历', key: Key('calendar-view'))),
-      agentBuilder: (context) =>
-          const Center(child: Text('AI 助手', key: Key('agent-view'))),
+      calendarBuilder:
+          calendarBuilder ??
+          (context) =>
+              const Center(child: Text('日历', key: Key('calendar-view'))),
+      agentBuilder:
+          agentBuilder ??
+          (context) =>
+              const Center(child: Text('AI 助手', key: Key('agent-view'))),
+    ),
+  );
+}
+
+class _StateSentinel extends StatefulWidget {
+  const _StateSentinel({required this.name});
+
+  final String name;
+
+  @override
+  State<_StateSentinel> createState() => _StateSentinelState();
+}
+
+class _StateSentinelState extends State<_StateSentinel> {
+  var count = 0;
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: FilledButton(
+      key: Key('${widget.name}-increment'),
+      onPressed: () => setState(() => count += 1),
+      child: Text('${widget.name}:$count'),
     ),
   );
 }
